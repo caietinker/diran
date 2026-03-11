@@ -1,13 +1,7 @@
+import { user } from '$lib/auth';
+import { supabase } from '$lib/supabase';
+import type { Todo } from '$lib/types/todo';
 import { get, writable } from 'svelte/store';
-import { user } from './auth';
-import { supabase } from './supabase';
-
-export interface Todo {
-	id: string;
-	name: string;
-	user_id: string;
-	created_at: string;
-}
 
 export const todos = writable<Todo[]>([]);
 export const todosLoading = writable(false);

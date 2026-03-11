@@ -1,18 +1,37 @@
 {
-	"name": "diran1",
-	"version": "0.0.1",
+	"name": "diran",
+	"version": "0.0.2",
 	"private": true,
+	"description": "personal app.",
+	"keywords": [
+		"sveltekit",
+		"svelte",
+		"tailwindcss",
+		"typescript",
+		"cloudflare",
+		"personal-app"
+	],
+	"homepage": "https://diran.app",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/caietinker/diran.git"
+	},
+	"license": "MIT",
+	"author": "Sharqawy <sherqo@diran.app>",
 	"type": "module",
 	"scripts": {
 		"build": "vite build",
 		"cf-typegen": "wrangler types",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"clean": "rm -rf dist .svelte-kit",
 		"deploy": "bun run build && wrangler deploy",
 		"dev": "vite dev",
 		"format": "prettier --write .",
+		"format:check": "prettier --check .",
 		"gen": "wrangler types",
 		"lint": "prettier --check . && eslint .",
+		"lint:fix": "eslint . --fix",
 		"prepare": "svelte-kit sync || echo ''",
 		"preview": "bun run build && wrangler dev"
 	},
@@ -48,5 +67,6 @@
 		"typescript-eslint": "^8.54.0",
 		"vite": "^7.3.1",
 		"wrangler": "^4.72.0"
-	}
+	},
+	"packageManager": "bun@1.3.8"
 }

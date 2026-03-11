@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { todos, fetchTodos, addTodo, removeTodo, todosLoading } from '$lib/todos';
+	import { todos, fetchTodos, addTodo, removeTodo, todosLoading } from '$lib/models/todos';
 	import { user, signOut } from '$lib/auth';
 	import Button from '$lib/components/ui/button/index.svelte';
 
