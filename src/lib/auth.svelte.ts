@@ -18,9 +18,7 @@ class Auth {
 
 	signInWithGitHub() {
 		const siteUrl = import.meta.env.VITE_SITE_URL as string | undefined;
-		const redirectTo = siteUrl
-			? `${siteUrl}/auth/callback`
-			: `${window.location.origin}/auth/callback`;
+		const redirectTo = siteUrl ?? window.location.origin;
 
 		return supabase.auth.signInWithOAuth({
 			provider: 'github',
