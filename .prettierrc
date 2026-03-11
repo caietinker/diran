@@ -1,16 +1,4 @@
 {
-	"useTabs": true,
-	"singleQuote": true,
-	"trailingComma": "none",
-	"printWidth": 100,
-	"plugins": [
-		"prettier-plugin-svelte",
-		"prettier-plugin-tailwindcss",
-		"prettier-plugin-sort-json",
-		"prettier-plugin-packagejson",
-		"prettier-plugin-css-order",
-		"prettier-plugin-organize-imports"
-	],
 	"overrides": [
 		{
 			"files": "*.svelte",
@@ -19,5 +7,17 @@
 			}
 		}
 	],
-	"tailwindStylesheet": "./src/routes/layout.css"
+	"plugins": [
+		"prettier-plugin-svelte",
+		"prettier-plugin-tailwindcss",
+		"prettier-plugin-sort-json",
+		"prettier-plugin-packagejson",
+		"prettier-plugin-css-order",
+		"prettier-plugin-organize-imports"
+	],
+	"printWidth": 100,
+	"singleQuote": true,
+	"tailwindStylesheet": "./src/routes/layout.css",
+	"trailingComma": "none",
+	"useTabs": true
 }
