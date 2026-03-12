@@ -26,7 +26,7 @@ CREATE POLICY "Users can update own categories" ON category
 CREATE POLICY "Users can delete own categories" ON category
   FOR DELETE USING (auth.uid() = user_id);
 
--- Recreate task table with new schema
+-- Recreate task table
 CREATE TABLE task (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   category_id UUID REFERENCES category(id) ON DELETE CASCADE NOT NULL,
@@ -34,12 +34,11 @@ CREATE TABLE task (
   description TEXT,
   repeat_freq VARCHAR(20),
   repeat_interval INT,
-  repeat_weekdays INT,  -- 7-bit mask: bit0=Mon, bit6=Sun
-  repeat_month_days INT, -- 31-bit mask: bit0=day1, bit30=day31
-  start_date BIGINT,     -- Unix timestamp (midnight) for once-time or start of repeat
-  end_date BIGINT,      -- Unix timestamp (midnight) for end of repeat
-  done_dates INT[] DEFAULT '{}',    -- Unix timestamps for completed dates
-  skipped_dates INT[] DEFAULT '{}'  -- Unix timestamps for skipped dates
+  repeat_weekdays INT,     -- 7-bit mask: bit0=Mon, bit6=Sun
+  repeat_month_days INT,   -- 31-bit mask: bit0=day1, bit30=day31
+  start_date BIGINT,       -- Unix timestamp (midnight) for once-time or start of repeat
+  end_date BIGINT,         -- Unix timestamp (midnight) for end of repeat
+  completed_at BIGINT      -- Unix timestamp (midnight) when a once-task was globally completed; NULL if not yet done
 );
 
 ALTER TABLE task ENABLE ROW LEVEL SECURITY;
@@ -61,7 +60,7 @@ CREATE POLICY "Users can delete own tasks" ON task
     EXISTS (SELECT 1 FROM category WHERE category.id = task.category_id AND category.user_id = auth.uid())
   );
 
--- Recreate session table (no instance, uses task_id directly)
+-- Recreate session table
 CREATE TABLE session (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   task_id UUID REFERENCES task(id) ON DELETE CASCADE NOT NULL,
@@ -96,13 +95,14 @@ CREATE POLICY "Users can update own sessions" ON session
     )
   );
 
--- Recreate history table (optional, for detailed history)
+-- Recreate history table
 CREATE TABLE history (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   task_id UUID REFERENCES task(id) ON DELETE CASCADE NOT NULL,
   date DATE NOT NULL,
   status VARCHAR(20) NOT NULL CHECK (status IN ('done', 'skipped')),
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT history_task_date_unique UNIQUE (task_id, date)
 );
 
 ALTER TABLE history ENABLE ROW LEVEL SECURITY;
@@ -123,8 +123,24 @@ CREATE POLICY "Users can insert own history" ON history
       WHERE task.id = history.task_id AND category.user_id = auth.uid()
     )
   );
+CREATE POLICY "Users can update own history" ON history
+  FOR UPDATE USING (
+    EXISTS (
+      SELECT 1 FROM task
+      JOIN category ON category.id = task.category_id
+      WHERE task.id = history.task_id AND category.user_id = auth.uid()
+    )
+  );
+CREATE POLICY "Users can delete own history" ON history
+  FOR DELETE USING (
+    EXISTS (
+      SELECT 1 FROM task
+      JOIN category ON category.id = task.category_id
+      WHERE task.id = history.task_id AND category.user_id = auth.uid()
+    )
+  );
 
--- Create indexes
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_task_category ON task(category_id);
 CREATE INDEX IF NOT EXISTS idx_session_task ON session(task_id);
 CREATE INDEX IF NOT EXISTS idx_history_task_date ON history(task_id, date DESC);
-CREATE INDEX IF NOT EXISTS idx_task_category ON task(category_id);

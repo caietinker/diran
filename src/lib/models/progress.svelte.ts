@@ -38,7 +38,7 @@ export const progress = new ProgressStore();
 /**
  * Calculate goal progress for a category within its goal period.
  * Returns current (completed sessions only) and target (goal_value).
- * For 'times': counts done_dates entries within the period.
+ * For 'times': counts history rows with status='done' within the period.
  * For 'seconds': sums completed session durations for tasks in the category.
  * Live elapsed time for any active session is added in the UI via a $derived.
  */
@@ -69,10 +69,10 @@ async function getGoalProgressForCategory(
 	// Include today fully (period end = start of tomorrow)
 	const periodEndUnix = todayUnix + 86400;
 
-	// Fetch all tasks in this category
+	// Fetch all task IDs in this category
 	const { data: taskData } = await supabase
 		.from('task')
-		.select('id, done_dates')
+		.select('id')
 		.eq('category_id', category.id);
 
 	const tasks = taskData ?? [];
@@ -80,13 +80,26 @@ async function getGoalProgressForCategory(
 	if (tasks.length === 0) return { current: 0, target: category.goal_value };
 
 	if (category.goal_type === 'times') {
-		// Count done_dates entries within [periodStartUnix, periodEndUnix)
-		let count = 0;
-		for (const task of tasks) {
-			const dates: number[] = task.done_dates ?? [];
-			count += dates.filter((d) => d >= periodStartUnix && d < periodEndUnix).length;
-		}
-		return { current: count, target: category.goal_value };
+		// Count history rows with status='done' within the period date range
+		const periodStartDate = new Date(periodStartUnix * 1000);
+		const periodEndDate = new Date((periodEndUnix - 1) * 1000); // inclusive end (today)
+		const toDateStr = (d: Date) =>
+			`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+		const startStr = toDateStr(periodStartDate);
+		const endStr = toDateStr(periodEndDate);
+
+		const taskIds = tasks.map((t) => t.id);
+		if (taskIds.length === 0) return { current: 0, target: category.goal_value };
+
+		const { count } = await supabase
+			.from('history')
+			.select('id', { count: 'exact', head: true })
+			.in('task_id', taskIds)
+			.eq('status', 'done')
+			.gte('date', startStr)
+			.lte('date', endStr);
+
+		return { current: count ?? 0, target: category.goal_value };
 	} else {
 		// seconds: sum (ended_at - started_at) for all completed sessions in period
 		const taskIds = tasks.map((t) => t.id);

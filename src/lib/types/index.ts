@@ -23,8 +23,7 @@ export interface Task {
 	repeat_month_days: number | null; // 31-bit mask: bit0=day1, bit30=day31
 	start_date: number | null; // Unix timestamp (midnight) for once-time or start of repeat
 	end_date: number | null; // Unix timestamp (midnight) for end of repeat
-	done_dates: number[]; // Unix timestamps (midnight) for completed dates
-	skipped_dates: number[]; // Unix timestamps (midnight) for skipped dates
+	completed_at: number | null; // Unix timestamp (midnight) when a once-task was globally completed; null if not yet done
 }
 
 export interface Session {

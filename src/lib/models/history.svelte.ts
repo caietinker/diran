@@ -8,12 +8,10 @@ function getTodayUnix(): number {
 	return Math.floor(d.getTime() / 1000);
 }
 
-export function isUndated(task: Task): boolean {
-	return !task.start_date && !task.end_date;
-}
-
-export function isDated(task: Task): boolean {
-	return !!task.start_date || !!task.end_date;
+/** Returns today's date as a YYYY-MM-DD string in the local timezone. */
+function getTodayDateStr(): string {
+	const d = new Date();
+	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /**
@@ -28,37 +26,19 @@ export function shouldFireOnDate(task: Task, date: Date): boolean {
 	const dayOfWeek = d.getDay() === 0 ? 7 : d.getDay(); // 1=Mon … 7=Sun
 	const dayOfMonth = d.getDate(); // 1-31
 
-	// ── Undated tasks ───────────────────────────────────────────────────────
-	if (isUndated(task)) {
-		if (task.repeat_freq === 'daily') {
-			const interval = task.repeat_interval ?? 1;
-			if (interval === 1) return true;
-			// Use a fixed epoch (2024-01-01 00:00:00 UTC) as the reference start
-			const epoch = 1704067200; // 2024-01-01
-			return ((dateUnix - epoch) / 86400) % interval === 0;
-		}
-		if (task.repeat_freq === 'weekly') {
-			const weekdayMask = task.repeat_weekdays ?? 0;
-			const todayBit = 1 << (dayOfWeek - 1);
-			return (weekdayMask & todayBit) !== 0;
-		}
-		if (task.repeat_freq === 'monthly') {
-			const monthDayMask = task.repeat_month_days ?? 0;
-			const todayBit = 1 << (dayOfMonth - 1);
-			return (monthDayMask & todayBit) !== 0;
-		}
-		// One-off undated task: fire today only
-		return dateUnix === getTodayUnix();
-	}
-
-	// ── One-off task with a specific date ───────────────────────────────────
+	// ── Once task (no repeat_freq) ───────────────────────────────────────────
 	if (!task.repeat_freq) {
+		// Already globally completed on a previous day — gone forever
+		if (task.completed_at !== null && task.completed_at < getTodayUnix()) return false;
+
 		if (task.start_date) {
+			// Once with a specific date: show only on that date
 			const startD = new Date(task.start_date * 1000);
 			startD.setHours(0, 0, 0, 0);
 			return dateUnix === Math.floor(startD.getTime() / 1000);
 		}
-		return dateUnix === getTodayUnix();
+		// Once, undated: show every day until completed
+		return true;
 	}
 
 	// ── Repeating task ───────────────────────────────────────────────────────
@@ -127,12 +107,6 @@ export function shouldFireOnDate(task: Task, date: Date): boolean {
 	return false;
 }
 
-export function getTaskStatusForDate(task: Task, dateUnix: number): 'pending' | 'done' | 'skipped' {
-	if (task.done_dates?.includes(dateUnix)) return 'done';
-	if (task.skipped_dates?.includes(dateUnix)) return 'skipped';
-	return 'pending';
-}
-
 export interface TodayTask {
 	task: TaskWithCategory;
 	status: 'pending' | 'done' | 'skipped';
@@ -161,6 +135,18 @@ class HistoryStore {
 		const today = getTodayUnix();
 		const todayDate = new Date();
 		const todayEnd = today + 86400; // start of tomorrow
+		const todayDateStr = getTodayDateStr();
+
+		// Fetch today's history entries for all tasks in one query
+		const { data: todayHistory } = await supabase
+			.from('history')
+			.select('task_id, status')
+			.eq('date', todayDateStr);
+
+		const statusMap = new Map<string, 'done' | 'skipped'>();
+		for (const row of todayHistory ?? []) {
+			statusMap.set(row.task_id, row.status as 'done' | 'skipped');
+		}
 
 		const { data: allSessions } = await supabase
 			.from('session')
@@ -174,7 +160,7 @@ class HistoryStore {
 
 			if (!shouldFireOnDate(task, todayDate)) continue;
 
-			const status = getTaskStatusForDate(task, today);
+			const status: 'pending' | 'done' | 'skipped' = statusMap.get(task.id) ?? 'pending';
 
 			const taskSessions = (allSessions ?? []).filter((s) => s.task_id === task.id);
 			let totalSessions = 0;
@@ -209,87 +195,58 @@ class HistoryStore {
 		this.loading = false;
 	}
 
-	async markDone(taskId: string) {
-		const today = getTodayUnix();
+	async markDone(taskId: string, isOnce: boolean) {
+		const todayDateStr = getTodayDateStr();
 
-		// Single fetch to get both arrays (no race condition)
-		const { data: task } = await supabase
-			.from('task')
-			.select('done_dates, skipped_dates')
-			.eq('id', taskId)
-			.single();
-
-		if (!task) return;
-
-		const currentDone: number[] = task.done_dates ?? [];
-		const currentSkipped: number[] = task.skipped_dates ?? [];
-
-		if (currentDone.includes(today)) return; // already done
-
+		// Upsert into history
 		await supabase
-			.from('task')
-			.update({
-				done_dates: [...currentDone, today],
-				skipped_dates: currentSkipped.filter((d) => d !== today)
-			})
-			.eq('id', taskId);
+			.from('history')
+			.upsert(
+				{ task_id: taskId, date: todayDateStr, status: 'done' },
+				{ onConflict: 'task_id,date' }
+			);
+
+		// For once tasks, also set completed_at so they disappear tomorrow
+		if (isOnce) {
+			await supabase.from('task').update({ completed_at: getTodayUnix() }).eq('id', taskId);
+		}
 
 		this.todayTasks = this.todayTasks.map((t) =>
 			t.task.id === taskId ? { ...t, status: 'done' as const } : t
 		);
 	}
 
-	async markSkipped(taskId: string) {
-		const today = getTodayUnix();
+	async markSkipped(taskId: string, isOnce: boolean) {
+		const todayDateStr = getTodayDateStr();
 
-		// Single fetch to get both arrays (no race condition)
-		const { data: task } = await supabase
-			.from('task')
-			.select('done_dates, skipped_dates')
-			.eq('id', taskId)
-			.single();
-
-		if (!task) return;
-
-		const currentDone: number[] = task.done_dates ?? [];
-		const currentSkipped: number[] = task.skipped_dates ?? [];
-
-		if (currentSkipped.includes(today)) return; // already skipped
-
+		// Upsert into history
 		await supabase
-			.from('task')
-			.update({
-				done_dates: currentDone.filter((d) => d !== today),
-				skipped_dates: [...currentSkipped, today]
-			})
-			.eq('id', taskId);
+			.from('history')
+			.upsert(
+				{ task_id: taskId, date: todayDateStr, status: 'skipped' },
+				{ onConflict: 'task_id,date' }
+			);
+
+		// For once tasks, also set completed_at so they disappear tomorrow
+		if (isOnce) {
+			await supabase.from('task').update({ completed_at: getTodayUnix() }).eq('id', taskId);
+		}
 
 		this.todayTasks = this.todayTasks.map((t) =>
 			t.task.id === taskId ? { ...t, status: 'skipped' as const } : t
 		);
 	}
 
-	async restore(taskId: string) {
-		const today = getTodayUnix();
+	async restore(taskId: string, isOnce: boolean) {
+		const todayDateStr = getTodayDateStr();
 
-		const { data: task } = await supabase
-			.from('task')
-			.select('done_dates, skipped_dates')
-			.eq('id', taskId)
-			.single();
+		// Delete today's history entry
+		await supabase.from('history').delete().eq('task_id', taskId).eq('date', todayDateStr);
 
-		if (!task) return;
-
-		const currentDone: number[] = task.done_dates ?? [];
-		const currentSkipped: number[] = task.skipped_dates ?? [];
-
-		await supabase
-			.from('task')
-			.update({
-				done_dates: currentDone.filter((d) => d !== today),
-				skipped_dates: currentSkipped.filter((d) => d !== today)
-			})
-			.eq('id', taskId);
+		// For once tasks, clear completed_at so they reappear
+		if (isOnce) {
+			await supabase.from('task').update({ completed_at: null }).eq('id', taskId);
+		}
 
 		this.todayTasks = this.todayTasks.map((t) =>
 			t.task.id === taskId ? { ...t, status: 'pending' as const } : t
@@ -297,41 +254,28 @@ class HistoryStore {
 	}
 
 	/**
-	 * Derive history from done_dates / skipped_dates on the task itself.
-	 * The dead `history` table is never queried.
+	 * Fetch task history from the history table.
 	 * Returns entries sorted newest-first, limited to 60.
 	 */
 	async fetchForTask(taskId: string): Promise<{ id: string; date: string; status: string }[]> {
-		const { data: task } = await supabase
-			.from('task')
-			.select('done_dates, skipped_dates')
-			.eq('id', taskId)
-			.single();
+		const { data } = await supabase
+			.from('history')
+			.select('id, date, status')
+			.eq('task_id', taskId)
+			.order('date', { ascending: false })
+			.limit(60);
 
-		if (!task) return [];
+		if (!data) return [];
 
-		const entries: { unix: number; status: 'done' | 'skipped' }[] = [];
-
-		for (const unix of task.done_dates ?? []) {
-			entries.push({ unix, status: 'done' });
-		}
-		for (const unix of task.skipped_dates ?? []) {
-			entries.push({ unix, status: 'skipped' });
-		}
-
-		// Sort descending (newest first), cap at 60
-		entries.sort((a, b) => b.unix - a.unix);
-		const limited = entries.slice(0, 60);
-
-		return limited.map((e) => ({
-			// Use the unix timestamp as a stable id for keying in the UI
-			id: String(e.unix),
-			date: new Date(e.unix * 1000).toLocaleDateString('en-GB', {
+		return data.map((row) => ({
+			id: row.id,
+			date: new Date(row.date).toLocaleDateString('en-GB', {
 				day: '2-digit',
 				month: 'short',
-				year: 'numeric'
+				year: 'numeric',
+				timeZone: 'UTC'
 			}),
-			status: e.status
+			status: row.status
 		}));
 	}
 }

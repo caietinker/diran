@@ -62,17 +62,17 @@
 	}
 
 	async function markDone(todayTask: TodayTask) {
-		await history.markDone(todayTask.task.id);
+		await history.markDone(todayTask.task.id, todayTask.task.repeat_freq === null);
 		await progress.refreshCategory(todayTask.task.category_id);
 	}
 
 	async function markSkipped(todayTask: TodayTask) {
-		await history.markSkipped(todayTask.task.id);
+		await history.markSkipped(todayTask.task.id, todayTask.task.repeat_freq === null);
 		await progress.refreshCategory(todayTask.task.category_id);
 	}
 
 	async function restore(todayTask: TodayTask) {
-		await history.restore(todayTask.task.id);
+		await history.restore(todayTask.task.id, todayTask.task.repeat_freq === null);
 		await progress.refreshCategory(todayTask.task.category_id);
 	}
 
@@ -218,7 +218,10 @@
 									onclick={() => (modal = { mode: 'edit', task: todayTask })}
 								>
 									<p class="truncate text-sm font-medium text-foreground">{todayTask.task.name}</p>
-									<p class="text-xs text-muted-foreground">{todayTask.task.category.name}</p>
+									<p class="text-xs text-muted-foreground">
+										{todayTask.task.category.name}<span class="ml-1 text-primary/70">(undated)</span
+										>
+									</p>
 								</button>
 								{#if isActive}
 									<span class="shrink-0 font-mono text-sm font-medium text-primary"
@@ -339,18 +342,23 @@
 					<div class="space-y-2">
 						{#each datedPending as todayTask (todayTask.task.id)}
 							{@const isActive = sessions.active?.task_id === todayTask.task.id}
-							{@const startStr = todayTask.task.start_date
-								? new Date(todayTask.task.start_date * 1000).toLocaleDateString('en-GB', {
+							{@const dateRange = (() => {
+								if (!todayTask.task.repeat_freq)
+									return todayTask.task.start_date
+										? `${new Date(todayTask.task.start_date * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} · once`
+										: 'once';
+								const fmt = (ts: number) =>
+									new Date(ts * 1000).toLocaleDateString('en-GB', {
 										day: '2-digit',
 										month: 'short'
-									})
-								: ''}
-							{@const endStr = todayTask.task.end_date
-								? new Date(todayTask.task.end_date * 1000).toLocaleDateString('en-GB', {
-										day: '2-digit',
-										month: 'short'
-									})
-								: ''}
+									});
+								const s = todayTask.task.start_date ? fmt(todayTask.task.start_date) : null;
+								const e = todayTask.task.end_date ? fmt(todayTask.task.end_date) : null;
+								if (s && e) return `${s} → ${e}`;
+								if (s) return `${s} → ∞`;
+								if (e) return `∞ → ${e}`;
+								return null;
+							})()}
 							<div
 								transition:fly={{ x: -12, duration: 200 }}
 								animate:flip={{ duration: 200 }}
@@ -369,10 +377,8 @@
 									<p class="truncate text-sm font-medium text-foreground">{todayTask.task.name}</p>
 									<p class="text-xs text-muted-foreground">
 										{todayTask.task.category.name}
-										{#if startStr || endStr}
-											<span class="ml-1 text-primary/70"
-												>({startStr}{startStr && endStr ? ' → ' : ''}{endStr})</span
-											>
+										{#if dateRange}
+											<span class="ml-1 text-primary/70">({dateRange})</span>
 										{/if}
 									</p>
 								</button>
@@ -418,18 +424,23 @@
 						</p>
 						<div class="space-y-1.5">
 							{#each datedDone as todayTask (todayTask.task.id)}
-								{@const startStr = todayTask.task.start_date
-									? new Date(todayTask.task.start_date * 1000).toLocaleDateString('en-GB', {
+								{@const dateRange = (() => {
+									if (!todayTask.task.repeat_freq)
+										return todayTask.task.start_date
+											? `${new Date(todayTask.task.start_date * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} · once`
+											: 'once';
+									const fmt = (ts: number) =>
+										new Date(ts * 1000).toLocaleDateString('en-GB', {
 											day: '2-digit',
 											month: 'short'
-										})
-									: ''}
-								{@const endStr = todayTask.task.end_date
-									? new Date(todayTask.task.end_date * 1000).toLocaleDateString('en-GB', {
-											day: '2-digit',
-											month: 'short'
-										})
-									: ''}
+										});
+									const s = todayTask.task.start_date ? fmt(todayTask.task.start_date) : null;
+									const e = todayTask.task.end_date ? fmt(todayTask.task.end_date) : null;
+									if (s && e) return `${s} → ${e}`;
+									if (s) return `${s} → ∞`;
+									if (e) return `∞ → ${e}`;
+									return null;
+								})()}
 								<div
 									transition:fly={{ x: 12, duration: 200 }}
 									class="group flex items-center gap-3 rounded-xl border border-border bg-card/60 px-4 py-2.5 opacity-60 hover:opacity-90"
@@ -445,10 +456,8 @@
 										<p class="truncate text-sm text-muted-foreground line-through">
 											{todayTask.task.name}
 										</p>
-										{#if startStr || endStr}
-											<p class="text-xs text-primary/70">
-												{startStr}{startStr && endStr ? ' → ' : ''}{endStr}
-											</p>
+										{#if dateRange}
+											<p class="text-xs text-primary/70">{dateRange}</p>
 										{/if}
 									</button>
 									{#if todayTask.totalSessions > 0}
@@ -474,18 +483,23 @@
 						</p>
 						<div class="space-y-1.5">
 							{#each datedSkipped as todayTask (todayTask.task.id)}
-								{@const startStr = todayTask.task.start_date
-									? new Date(todayTask.task.start_date * 1000).toLocaleDateString('en-GB', {
+								{@const dateRange = (() => {
+									if (!todayTask.task.repeat_freq)
+										return todayTask.task.start_date
+											? `${new Date(todayTask.task.start_date * 1000).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} · once`
+											: 'once';
+									const fmt = (ts: number) =>
+										new Date(ts * 1000).toLocaleDateString('en-GB', {
 											day: '2-digit',
 											month: 'short'
-										})
-									: ''}
-								{@const endStr = todayTask.task.end_date
-									? new Date(todayTask.task.end_date * 1000).toLocaleDateString('en-GB', {
-											day: '2-digit',
-											month: 'short'
-										})
-									: ''}
+										});
+									const s = todayTask.task.start_date ? fmt(todayTask.task.start_date) : null;
+									const e = todayTask.task.end_date ? fmt(todayTask.task.end_date) : null;
+									if (s && e) return `${s} → ${e}`;
+									if (s) return `${s} → ∞`;
+									if (e) return `∞ → ${e}`;
+									return null;
+								})()}
 								<div
 									transition:fly={{ x: 12, duration: 200 }}
 									class="group flex items-center gap-3 rounded-xl border border-border bg-card/40 px-4 py-2.5 opacity-50 hover:opacity-80"
@@ -499,10 +513,8 @@
 										onclick={() => (modal = { mode: 'edit', task: todayTask })}
 									>
 										<p class="truncate text-sm text-muted-foreground">{todayTask.task.name}</p>
-										{#if startStr || endStr}
-											<p class="text-xs text-primary/70">
-												{startStr}{startStr && endStr ? ' → ' : ''}{endStr}
-											</p>
+										{#if dateRange}
+											<p class="text-xs text-primary/70">{dateRange}</p>
 										{/if}
 									</button>
 									<button

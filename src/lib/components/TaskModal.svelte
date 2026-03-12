@@ -40,13 +40,15 @@
 	let editStartDate = $state(
 		untrack(() => {
 			if (!task?.start_date) return '';
-			return new Date(task.start_date * 1000).toISOString().split('T')[0];
+			const d = new Date(task.start_date * 1000);
+			return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 		})
 	);
 	let editEndDate = $state(
 		untrack(() => {
 			if (!task?.end_date) return '';
-			return new Date(task.end_date * 1000).toISOString().split('T')[0];
+			const d = new Date(task.end_date * 1000);
+			return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 		})
 	);
 	let saving = $state(false);
@@ -162,8 +164,7 @@
 				repeat_month_days: freq === 'monthly' ? editRepeatMonthDays : null,
 				start_date: startDateUnix,
 				end_date: endDateUnix,
-				done_dates: [],
-				skipped_dates: []
+				completed_at: null
 			});
 		} else if (task) {
 			await tasks.update(task.id, {
