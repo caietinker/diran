@@ -114,8 +114,18 @@ export interface TodayTask {
 	todaySessions: number; // time tracked today in seconds
 }
 
+export interface AllTasksItem {
+	task: TaskWithCategory;
+	date: string; // YYYY-MM-DD
+	dateUnix: number;
+	status: 'pending' | 'done' | 'skipped';
+	totalSessions: number;
+	dateSessions: number;
+}
+
 class HistoryStore {
 	todayTasks = $state<TodayTask[]>([]);
+	allTasks = $state<AllTasksItem[]>([]);
 	loading = $state(false);
 
 	async fetchTodayTasks(
@@ -192,6 +202,116 @@ class HistoryStore {
 		});
 
 		this.todayTasks = computed;
+		this.loading = false;
+	}
+
+	async fetchAllTasks(
+		tasks: Task[],
+		categories: {
+			id: string;
+			name: string;
+			color: string;
+			goal_type: string;
+			goal_value: number;
+			goal_period: string;
+		}[]
+	) {
+		if (!auth.user) return;
+		this.loading = true;
+
+		const todayUnix = getTodayUnix();
+		const todayDate = new Date();
+		todayDate.setHours(0, 0, 0, 0);
+
+		// Fetch all history entries
+		const { data: allHistory } = await supabase
+			.from('history')
+			.select('task_id, date, status')
+			.order('date', { ascending: false });
+
+		const historyMap = new Map<string, Map<string, 'done' | 'skipped'>>();
+		for (const row of allHistory ?? []) {
+			if (!historyMap.has(row.task_id)) {
+				historyMap.set(row.task_id, new Map());
+			}
+			historyMap.get(row.task_id)!.set(row.date, row.status as 'done' | 'skipped');
+		}
+
+		const { data: allSessions } = await supabase
+			.from('session')
+			.select('task_id, started_at, ended_at');
+
+		const computed: AllTasksItem[] = [];
+		const todayStr = getTodayDateStr();
+
+		// Generate dates: 365 days past to 90 days future
+		const pastDays = 365;
+		const futureDays = 90;
+
+		for (let i = -pastDays; i <= futureDays; i++) {
+			const date = new Date(todayDate);
+			date.setDate(date.getDate() + i);
+			const dateUnix = Math.floor(date.getTime() / 1000);
+			const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+			const isToday = i === 0;
+			const isPast = i < 0;
+			const isFuture = i > 0;
+
+			for (const task of tasks) {
+				const cat = categories.find((c) => c.id === task.category_id);
+				if (!cat) continue;
+
+				if (!shouldFireOnDate(task, date)) continue;
+
+				// Skip past undated once tasks that are completed
+				if (isPast && !task.repeat_freq && !task.start_date && task.completed_at !== null) {
+					continue;
+				}
+
+				const taskHistory = historyMap.get(task.id);
+				const status: 'pending' | 'done' | 'skipped' = taskHistory?.get(dateStr) ?? 'pending';
+
+				// For future: only show pending (no history entries yet)
+				if (isFuture && status !== 'pending') continue;
+
+				const taskSessions = (allSessions ?? []).filter((s) => s.task_id === task.id);
+				let totalSessions = 0;
+				let dateSessions = 0;
+				const dayStart = dateUnix;
+				const dayEnd = dateUnix + 86400;
+
+				for (const session of taskSessions) {
+					const sessionEnd = session.ended_at ?? Math.floor(Date.now() / 1000);
+					const duration = sessionEnd - session.started_at;
+					totalSessions += duration;
+					if (session.started_at >= dayStart && session.started_at < dayEnd) {
+						dateSessions += duration;
+					}
+				}
+
+				computed.push({
+					task: {
+						...task,
+						category: cat as unknown as import('$lib/types').Category
+					},
+					date: dateStr,
+					dateUnix,
+					status,
+					totalSessions,
+					dateSessions
+				});
+			}
+		}
+
+		// Sort by date (newest first), then by status
+		computed.sort((a, b) => {
+			if (a.date !== b.date) return b.date.localeCompare(a.date);
+			const order = { pending: 0, done: 1, skipped: 2 };
+			return order[a.status] - order[b.status];
+		});
+
+		this.allTasks = computed;
 		this.loading = false;
 	}
 
