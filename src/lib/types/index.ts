@@ -19,7 +19,8 @@ export interface Task {
 	name: string;
 	repeat_freq: RepeatFreq | null;
 	repeat_interval: number | null;
-	repeat_days: number[] | null;
+	repeat_weekdays: number | null; // 7-bit mask: bit0=Mon, bit6=Sun
+	repeat_month_days: number | null; // 31-bit mask: bit0=day1, bit30=day31
 }
 
 export interface Instance {
