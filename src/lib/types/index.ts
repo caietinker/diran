@@ -17,6 +17,7 @@ export interface Task {
 	id: string;
 	category_id: string;
 	name: string;
+	description: string | null;
 	repeat_freq: RepeatFreq | null;
 	repeat_interval: number | null;
 	repeat_weekdays: number | null; // 7-bit mask: bit0=Mon, bit6=Sun

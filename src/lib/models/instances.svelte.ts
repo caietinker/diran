@@ -116,6 +116,16 @@ class InstanceStore {
 		}
 	}
 
+	async restore(id: string) {
+		const { error } = await supabase
+			.from('instance')
+			.update({ status: 'pending' as const })
+			.eq('id', id);
+		if (!error) {
+			this.items = this.items.map((i) => (i.id === id ? { ...i, status: 'pending' as const } : i));
+		}
+	}
+
 	async addOneOff(taskId: string) {
 		const today = todayStr();
 		const { data, error } = await supabase
@@ -133,6 +143,15 @@ class InstanceStore {
 			} as InstanceWithTask;
 			this.items = [...this.items, mapped];
 		}
+	}
+	async fetchForTask(taskId: string): Promise<{ id: string; date: string; status: string }[]> {
+		const { data } = await supabase
+			.from('instance')
+			.select('id, date, status')
+			.eq('task_id', taskId)
+			.order('date', { ascending: false })
+			.limit(30);
+		return (data ?? []) as { id: string; date: string; status: string }[];
 	}
 }
 

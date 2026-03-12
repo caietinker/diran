@@ -4,20 +4,15 @@
 	import { categories } from '$lib/models/categories.svelte';
 	import { tasks } from '$lib/models/tasks.svelte';
 	import { instances } from '$lib/models/instances.svelte';
-	import Button from '$lib/components/ui/button/index.svelte';
-	import type { RepeatFreq, Category, Task } from '$lib/types';
+	import TaskModal from '$lib/components/TaskModal.svelte';
+	import type { Category, Task } from '$lib/types';
 
 	let category = $state<Category | null>(null);
 	let categoryTasks = $derived(tasks.items.filter((t) => t.category_id === category?.id));
 
-	let showTaskForm = $state(false);
-	let taskName = $state('');
-	let repeatFreq = $state<RepeatFreq | ''>('');
-	let repeatInterval = $state(1);
-	let repeatWeekdays = $state(0);
-	let repeatMonthDays = $state(0);
+	// null = closed; 'add' = new task modal; task = edit that task
+	let modal = $state<null | 'add' | Task>(null);
 
-	const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 	const dayFull = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 	$effect(() => {
@@ -32,50 +27,16 @@
 		if (!category) void goto('/categories');
 	}
 
-	function toggleWeekday(day: number) {
-		repeatWeekdays ^= 1 << (day - 1);
+	async function onModalClose(changed: boolean) {
+		modal = null;
+		if (changed) await loadCategory();
 	}
 
-	function toggleMonthDay(day: number) {
-		repeatMonthDays ^= 1 << (day - 1);
-	}
-
-	async function handleAddTask(e: Event) {
-		e.preventDefault();
-		if (!category) return;
-		const freq = repeatFreq === '' ? null : repeatFreq;
-		const newTask = await tasks.add({
-			category_id: category.id,
-			name: taskName,
-			repeat_freq: freq as RepeatFreq | null,
-			repeat_interval: freq ? repeatInterval : null,
-			repeat_weekdays: freq === 'weekly' ? repeatWeekdays : null,
-			repeat_month_days: freq === 'monthly' ? repeatMonthDays : null
-		});
-		if (!freq && newTask) await instances.addOneOff(newTask.id);
-		taskName = '';
-		repeatFreq = '';
-		repeatInterval = 1;
-		repeatWeekdays = 0;
-		repeatMonthDays = 0;
-		showTaskForm = false;
-	}
-
-	async function handleDeleteTask(id: string) {
-		await tasks.remove(id);
-	}
 	async function handleDeleteCategory() {
 		if (category) {
 			await categories.remove(category.id);
 			void goto('/categories');
 		}
-	}
-
-	function isWeekdaySelected(day: number): boolean {
-		return (repeatWeekdays & (1 << (day - 1))) !== 0;
-	}
-	function isMonthDaySelected(day: number): boolean {
-		return (repeatMonthDays & (1 << (day - 1))) !== 0;
 	}
 
 	function describeRepeat(task: Task): string {
@@ -86,7 +47,7 @@
 			const mask = task.repeat_weekdays ?? 0;
 			const sel = dayFull.filter((_, i) => (mask & (1 << i)) !== 0);
 			if (sel.length === 0) return 'Weekly';
-			return (n > 1 ? `Every ${n} weeks on ` : 'Weekly ') + sel.join(', ');
+			return (n > 1 ? `Every ${n} weeks on ` : 'Weekly on ') + sel.join(', ');
 		}
 		if (task.repeat_freq === 'monthly') {
 			const mask = task.repeat_month_days ?? 0;
@@ -97,150 +58,96 @@
 		}
 		return task.repeat_freq;
 	}
+
+	function goalDisplay(cat: Category): string {
+		if (cat.goal_type === 'times') return `${cat.goal_value}× / ${cat.goal_period}`;
+		const hrs = Math.floor(cat.goal_value / 3600);
+		const mins = Math.floor((cat.goal_value % 3600) / 60);
+		const parts = [];
+		if (hrs > 0) parts.push(`${hrs}h`);
+		if (mins > 0) parts.push(`${mins}m`);
+		return (parts.length ? parts.join(' ') : `${cat.goal_value}s`) + ` / ${cat.goal_period}`;
+	}
 </script>
 
+<!-- ── Modal ── -->
+{#if modal !== null}
+	{#if modal === 'add'}
+		<TaskModal mode="add" defaultCategoryId={category?.id ?? ''} onclose={onModalClose} />
+	{:else}
+		<TaskModal mode="edit" task={modal} onclose={onModalClose} />
+	{/if}
+{/if}
+
 {#if category}
-	<main class="mx-auto max-w-lg p-4">
-		<div class="mb-6">
+	<main class="mx-auto max-w-2xl px-4 py-6">
+		<!-- ── Header ── -->
+		<div class="mb-8">
 			<a href="/categories" class="text-sm text-muted-foreground hover:text-foreground"
-				>&larr; Back</a
+				>&larr; Back to categories</a
 			>
-			<div class="mt-2 flex items-center gap-2">
-				<div class="h-4 w-4 rounded" style="background-color: {category.color}"></div>
-				<h1 class="text-xl font-semibold text-foreground">{category.name}</h1>
+			<div class="mt-3 flex items-center gap-3">
+				<div class="h-5 w-5 rounded-md" style="background-color: {category.color}"></div>
+				<h1 class="text-2xl font-semibold tracking-tight text-foreground">{category.name}</h1>
 			</div>
-			<p class="mt-1 text-sm text-muted-foreground">
-				{category.goal_value}
-				{category.goal_type === 'times' ? 'x' : 'min'} / {category.goal_period}
-			</p>
+			<p class="mt-1 text-sm text-muted-foreground">{goalDisplay(category)}</p>
 		</div>
 
+		<!-- ── Tasks section ── -->
 		<div class="mb-4 flex items-center justify-between">
-			<h2 class="text-sm font-medium text-muted-foreground">Tasks</h2>
+			<h2 class="text-sm font-semibold tracking-wide text-muted-foreground uppercase">
+				Tasks ({categoryTasks.length})
+			</h2>
 			<button
-				onclick={() => (showTaskForm = !showTaskForm)}
-				class="text-sm text-primary hover:underline"
+				onclick={() => (modal = 'add')}
+				class="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary/90"
 			>
-				{showTaskForm ? 'cancel' : '+ add'}
+				+ Add task
 			</button>
 		</div>
 
-		{#if showTaskForm}
-			<form
-				onsubmit={handleAddTask}
-				class="mb-6 space-y-3 rounded border border-border bg-card p-4"
-			>
-				<input
-					type="text"
-					bind:value={taskName}
-					required
-					placeholder="Task name"
-					class="w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground"
-				/>
-
-				<div class="flex gap-1">
-					{#each [{ v: '', l: 'Once' }, { v: 'daily', l: 'Daily' }, { v: 'weekly', l: 'Weekly' }, { v: 'monthly', l: 'Monthly' }] as opt}
-						<button
-							type="button"
-							onclick={() => (repeatFreq = opt.v as RepeatFreq | '')}
-							class="flex-1 rounded border py-1.5 text-xs {repeatFreq === opt.v
-								? 'bg-foreground text-background'
-								: 'border-border text-muted-foreground'}">{opt.l}</button
-						>
-					{/each}
-				</div>
-
-				{#if repeatFreq === 'daily'}
-					<div class="flex items-center gap-2 text-sm text-muted-foreground">
-						Every <input
-							type="number"
-							min="1"
-							bind:value={repeatInterval}
-							class="w-16 rounded border border-border bg-background px-2 py-1 text-center text-foreground"
-						/>
-						day{repeatInterval > 1 ? 's' : ''}
-					</div>
-				{/if}
-
-				{#if repeatFreq === 'weekly'}
-					<div class="space-y-2">
-						<div class="flex items-center gap-2 text-sm text-muted-foreground">
-							Every <input
-								type="number"
-								min="1"
-								bind:value={repeatInterval}
-								class="w-12 rounded border border-border bg-background px-2 py-1 text-center text-foreground"
-							/>
-							week{repeatInterval > 1 ? 's' : ''} on
-						</div>
-						<div class="flex gap-1">
-							{#each dayLabels as label, i}
-								{@const day = i + 1}
-								<button
-									type="button"
-									onclick={() => toggleWeekday(day)}
-									class="flex-1 rounded py-1.5 text-xs {isWeekdaySelected(day)
-										? 'bg-primary text-white'
-										: 'border border-border text-muted-foreground'}">{label}</button
-								>
-							{/each}
-						</div>
-					</div>
-				{/if}
-
-				{#if repeatFreq === 'monthly'}
-					<div class="flex items-center gap-2 text-sm text-muted-foreground">
-						Every <input
-							type="number"
-							min="1"
-							bind:value={repeatInterval}
-							class="w-12 rounded border border-border bg-background px-2 py-1 text-center text-foreground"
-						/>
-						month{repeatInterval > 1 ? 's' : ''} on days
-					</div>
-					<div class="grid grid-cols-7 gap-1">
-						{#each Array(31) as _, i}
-							{@const day = i + 1}
-							<button
-								type="button"
-								onclick={() => toggleMonthDay(day)}
-								class="rounded py-1 text-xs {isMonthDaySelected(day)
-									? 'bg-primary text-white'
-									: 'border border-border text-muted-foreground'}">{day}</button
-							>
-						{/each}
-					</div>
-				{/if}
-
-				<Button type="submit" class="w-full">Add Task</Button>
-			</form>
-		{/if}
-
 		{#if categoryTasks.length === 0}
-			<div class="rounded border border-border bg-card p-6 text-center">
-				<p class="text-muted-foreground">No tasks</p>
+			<div class="rounded-xl border border-border bg-card px-6 py-10 text-center">
+				<p class="text-sm text-muted-foreground">No tasks yet.</p>
+				<button onclick={() => (modal = 'add')} class="mt-2 text-sm text-primary hover:underline"
+					>Add your first task</button
+				>
 			</div>
 		{:else}
-			<div class="space-y-1">
+			<div class="space-y-2">
 				{#each categoryTasks as task (task.id)}
-					<div class="flex items-center justify-between rounded border border-border bg-card p-3">
-						<div>
+					<div
+						class="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:border-foreground/20"
+					>
+						<div class="min-w-0 flex-1">
 							<p class="text-sm font-medium text-foreground">{task.name}</p>
-							<p class="text-xs text-muted-foreground">{describeRepeat(task)}</p>
+							{#if task.description}
+								<p class="mt-0.5 truncate text-xs text-muted-foreground">{task.description}</p>
+							{/if}
+							<p class="mt-0.5 text-xs text-muted-foreground">{describeRepeat(task)}</p>
 						</div>
 						<button
-							onclick={() => handleDeleteTask(task.id)}
-							class="text-muted-foreground hover:text-destructive">✕</button
+							onclick={() => (modal = task)}
+							class="shrink-0 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
 						>
+							Edit
+						</button>
 					</div>
 				{/each}
 			</div>
 		{/if}
 
-		<div class="mt-8 border-t border-border pt-4">
-			<button onclick={handleDeleteCategory} class="text-sm text-destructive hover:underline"
-				>Delete category</button
+		<!-- ── Danger zone ── -->
+		<div class="mt-12 border-t border-border pt-6">
+			<p class="mb-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+				Danger zone
+			</p>
+			<button
+				onclick={handleDeleteCategory}
+				class="rounded-lg border border-destructive/40 px-4 py-2 text-sm text-destructive transition-colors hover:bg-destructive hover:text-white"
 			>
+				Delete category
+			</button>
 		</div>
 	</main>
 {/if}

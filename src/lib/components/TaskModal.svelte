@@ -1,0 +1,567 @@
+<script lang="ts">
+	import { categories } from '$lib/models/categories.svelte';
+	import { tasks } from '$lib/models/tasks.svelte';
+	import { instances } from '$lib/models/instances.svelte';
+	import { sessions } from '$lib/models/sessions.svelte';
+	import type { Task, Session, RepeatFreq, InstanceWithTask } from '$lib/types';
+
+	/**
+	 * Props:
+	 *  - mode: 'add' (no task/instance yet) | 'edit' (existing task, possibly with an instance)
+	 *  - task: existing Task when mode='edit'
+	 *  - instance: existing InstanceWithTask when opened from Today (optional even in edit mode)
+	 *  - defaultCategoryId: pre-select a category (used when opening from a category page)
+	 *  - onclose: called after close/save (so parent can refresh)
+	 */
+	interface Props {
+		mode: 'add' | 'edit';
+		task?: Task | null;
+		instance?: InstanceWithTask | null;
+		defaultCategoryId?: string;
+		elapsed?: number; // live elapsed seconds from parent timer (for active session display)
+		onclose: (changed: boolean) => void;
+	}
+
+	let {
+		mode,
+		task = null,
+		instance = null,
+		defaultCategoryId = '',
+		elapsed = 0,
+		onclose
+	}: Props = $props();
+
+	// ─── Tabs ──────────────────────────────────────────────────────────────────
+	type Tab = 'edit' | 'sessions' | 'history';
+	let activeTab = $state<Tab>('edit');
+
+	// ─── Edit form state ───────────────────────────────────────────────────────
+	let editName = $state(task?.name ?? '');
+	let editDescription = $state(task?.description ?? '');
+	let editCategoryId = $state(task?.category_id ?? defaultCategoryId);
+	let editRepeatFreq = $state<RepeatFreq | ''>(task?.repeat_freq ?? '');
+	let editRepeatInterval = $state(task?.repeat_interval ?? 1);
+	let editRepeatWeekdays = $state(task?.repeat_weekdays ?? 0);
+	let editRepeatMonthDays = $state(task?.repeat_month_days ?? 0);
+	let saving = $state(false);
+	let saveError = $state('');
+	let deleting = $state(false);
+
+	// ─── Sessions tab state ────────────────────────────────────────────────────
+	let drawerInstanceId = $state<string | null>(instance?.id ?? null);
+	let drawerSessions = $state<Session[]>([]);
+	let sessionsLoading = $state(false);
+
+	// ─── History tab state ─────────────────────────────────────────────────────
+	let historyItems = $state<{ id: string; date: string; status: string }[]>([]);
+	let historyLoading = $state(false);
+
+	// ─── Constants ─────────────────────────────────────────────────────────────
+	const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+	const DAY_SHORT = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+	// ─── Load sessions / history on mount if in edit mode ─────────────────────
+	$effect(() => {
+		if (mode === 'edit' && task) {
+			if (instance) {
+				loadSessions(instance.id);
+			}
+			loadHistory(task.id);
+		}
+	});
+
+	async function loadSessions(instId: string) {
+		sessionsLoading = true;
+		drawerSessions = await sessions.fetchForInstance(instId);
+		sessionsLoading = false;
+	}
+
+	async function loadHistory(taskId: string) {
+		historyLoading = true;
+		historyItems = await instances.fetchForTask(taskId);
+		historyLoading = false;
+	}
+
+	async function selectHistoryInstance(instId: string) {
+		drawerInstanceId = instId;
+		activeTab = 'sessions';
+		await loadSessions(instId);
+	}
+
+	// ─── Re-fetch sessions when active session changes ────────────────────────
+	$effect(() => {
+		const _active = sessions.active;
+		if (drawerInstanceId && activeTab === 'sessions') {
+			loadSessions(drawerInstanceId);
+		}
+	});
+
+	// ─── Weekday / month-day helpers ──────────────────────────────────────────
+	function toggleWeekday(bit: number) {
+		editRepeatWeekdays ^= 1 << (bit - 1);
+	}
+	function weekdayOn(bit: number): boolean {
+		return (editRepeatWeekdays & (1 << (bit - 1))) !== 0;
+	}
+	function toggleMonthDay(bit: number) {
+		editRepeatMonthDays ^= 1 << (bit - 1);
+	}
+	function monthDayOn(bit: number): boolean {
+		return (editRepeatMonthDays & (1 << (bit - 1))) !== 0;
+	}
+
+	// ─── Save ─────────────────────────────────────────────────────────────────
+	async function handleSave() {
+		if (!editName.trim()) {
+			saveError = 'Task name is required.';
+			return;
+		}
+		if (!editCategoryId) {
+			saveError = 'Please select a category.';
+			return;
+		}
+		saveError = '';
+		saving = true;
+
+		const freq = editRepeatFreq === '' ? null : (editRepeatFreq as RepeatFreq);
+
+		if (mode === 'add') {
+			const newTask = await tasks.add({
+				category_id: editCategoryId,
+				name: editName.trim(),
+				description: editDescription.trim() || null,
+				repeat_freq: freq,
+				repeat_interval: freq ? editRepeatInterval : null,
+				repeat_weekdays: freq === 'weekly' ? editRepeatWeekdays : null,
+				repeat_month_days: freq === 'monthly' ? editRepeatMonthDays : null
+			});
+			// If no repeat (one-off), immediately create an instance for today
+			if (!freq && newTask) {
+				await instances.addOneOff(newTask.id);
+			}
+		} else if (task) {
+			await tasks.update(task.id, {
+				category_id: editCategoryId,
+				name: editName.trim(),
+				description: editDescription.trim() || null,
+				repeat_freq: freq,
+				repeat_interval: freq ? editRepeatInterval : null,
+				repeat_weekdays: freq === 'weekly' ? editRepeatWeekdays : null,
+				repeat_month_days: freq === 'monthly' ? editRepeatMonthDays : null
+			});
+		}
+
+		saving = false;
+		onclose(true);
+	}
+
+	// ─── Delete task ──────────────────────────────────────────────────────────
+	async function handleDelete() {
+		if (!task) return;
+		deleting = true;
+		await tasks.remove(task.id);
+		deleting = false;
+		onclose(true);
+	}
+
+	// ─── Format helpers ───────────────────────────────────────────────────────
+	function fmtClock(unix: number): string {
+		return new Date(unix * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	}
+
+	function fmtDuration(secs: number): string {
+		const h = Math.floor(secs / 3600);
+		const m = Math.floor((secs % 3600) / 60);
+		const s = secs % 60;
+		if (h > 0) return `${h}h ${m}m`;
+		if (m > 0) return `${m}m ${s}s`;
+		return `${s}s`;
+	}
+
+	function sessionDuration(s: Session): number {
+		return (s.ended_at ?? Math.floor(Date.now() / 1000)) - s.started_at;
+	}
+
+	// ─── Total (live when active session is open) ─────────────────────────────
+	const totalSeconds = $derived(
+		drawerSessions.reduce((acc, s) => {
+			if (s.ended_at === null && sessions.active?.id === s.id) return acc + elapsed;
+			return acc + (s.ended_at ?? 0) - s.started_at;
+		}, 0)
+	);
+
+	// ─── Dismiss on backdrop click ────────────────────────────────────────────
+	function onBackdropClick(e: MouseEvent) {
+		if ((e.target as HTMLElement).dataset.backdrop) onclose(false);
+	}
+
+	// ─── Keyboard close ───────────────────────────────────────────────────────
+	function onKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape') onclose(false);
+	}
+
+	// ─── Derived display helpers ──────────────────────────────────────────────
+	const hasInstance = $derived(mode === 'edit' && instance !== null);
+	const selectedCategory = $derived(categories.items.find((c) => c.id === editCategoryId));
+</script>
+
+<svelte:window onkeydown={onKeydown} />
+
+<!-- Backdrop -->
+<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+<div
+	class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+	data-backdrop="1"
+	onclick={onBackdropClick}
+>
+	<!-- Modal panel -->
+	<div
+		class="relative flex w-full max-w-xl flex-col rounded-xl border border-border bg-card shadow-2xl"
+		style="max-height: min(90vh, 680px);"
+	>
+		<!-- ── Header ── -->
+		<div class="flex items-center gap-3 border-b border-border px-5 py-4">
+			{#if selectedCategory}
+				<div
+					class="h-3 w-3 shrink-0 rounded-full"
+					style="background-color: {selectedCategory.color}"
+				></div>
+			{/if}
+			<h2 class="flex-1 text-base font-semibold text-foreground">
+				{mode === 'add' ? 'New task' : (task?.name ?? 'Task')}
+			</h2>
+			<button
+				onclick={() => onclose(false)}
+				class="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+				aria-label="Close"
+			>
+				<svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+					<path
+						d="M3 3l10 10M13 3L3 13"
+						stroke="currentColor"
+						stroke-width="1.5"
+						stroke-linecap="round"
+					/>
+				</svg>
+			</button>
+		</div>
+
+		<!-- ── Tabs (only show Sessions + History in edit mode with an instance) ── -->
+		{#if hasInstance}
+			<div class="flex border-b border-border px-5">
+				{#each ['edit', 'sessions', 'history'] as Tab[] as tab (tab)}
+					<button
+						onclick={() => (activeTab = tab)}
+						class="relative mr-5 pt-3 pb-3 text-sm font-medium transition-colors {activeTab === tab
+							? 'text-foreground after:absolute after:bottom-0 after:left-0 after:h-0.5 after:w-full after:bg-primary'
+							: 'text-muted-foreground hover:text-foreground'}"
+					>
+						{tab.charAt(0).toUpperCase() + tab.slice(1)}
+					</button>
+				{/each}
+			</div>
+		{/if}
+
+		<!-- ── Scrollable body ── -->
+		<div class="flex-1 overflow-y-auto px-5 py-4">
+			<!-- ════════════════ EDIT TAB ════════════════ -->
+			{#if activeTab === 'edit'}
+				<div class="space-y-4">
+					<!-- Task name -->
+					<div class="space-y-1.5">
+						<label
+							for="task-name"
+							class="text-xs font-medium tracking-wide text-muted-foreground uppercase"
+							>Task name</label
+						>
+						<input
+							id="task-name"
+							type="text"
+							bind:value={editName}
+							placeholder="e.g. Morning run"
+							class="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none"
+						/>
+					</div>
+
+					<!-- Description -->
+					<div class="space-y-1.5">
+						<label
+							for="task-desc"
+							class="text-xs font-medium tracking-wide text-muted-foreground uppercase"
+							>Description <span class="font-normal normal-case">(optional)</span></label
+						>
+						<textarea
+							id="task-desc"
+							bind:value={editDescription}
+							rows={3}
+							placeholder="Notes, context, links…"
+							class="w-full resize-none rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none"
+						></textarea>
+					</div>
+
+					<!-- Category picker -->
+					<div class="space-y-1.5">
+						<p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+							Category
+						</p>
+						<div class="flex flex-wrap gap-2">
+							{#each categories.items as cat (cat.id)}
+								<button
+									type="button"
+									onclick={() => (editCategoryId = cat.id)}
+									class="flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all {editCategoryId ===
+									cat.id
+										? 'border-transparent text-white shadow-sm'
+										: 'border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+									style={editCategoryId === cat.id ? `background-color: ${cat.color}` : ''}
+								>
+									<span
+										class="h-1.5 w-1.5 rounded-full {editCategoryId === cat.id
+											? 'bg-white/70'
+											: ''}"
+										style={editCategoryId !== cat.id ? `background-color: ${cat.color}` : ''}
+									></span>
+									{cat.name}
+								</button>
+							{/each}
+						</div>
+					</div>
+
+					<!-- Repeat frequency -->
+					<div class="space-y-3">
+						<p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">Repeat</p>
+						<div class="grid grid-cols-4 gap-1.5">
+							{#each [{ v: '', l: 'Once' }, { v: 'daily', l: 'Daily' }, { v: 'weekly', l: 'Weekly' }, { v: 'monthly', l: 'Monthly' }] as opt (opt.v)}
+								<button
+									type="button"
+									onclick={() => (editRepeatFreq = opt.v as RepeatFreq | '')}
+									class="rounded-lg border py-2 text-sm font-medium transition-all {editRepeatFreq ===
+									opt.v
+										? 'border-primary bg-primary/10 text-primary'
+										: 'border-border bg-background text-muted-foreground hover:border-foreground/30 hover:text-foreground'}"
+								>
+									{opt.l}
+								</button>
+							{/each}
+						</div>
+
+						<!-- Daily sub-options -->
+						{#if editRepeatFreq === 'daily'}
+							<div class="flex items-center gap-3 rounded-lg bg-muted px-4 py-3 text-sm">
+								<span class="text-muted-foreground">Every</span>
+								<input
+									type="number"
+									min="1"
+									max="365"
+									bind:value={editRepeatInterval}
+									class="w-16 rounded-md border border-border bg-background px-2 py-1 text-center text-sm text-foreground focus:border-primary focus:outline-none"
+								/>
+								<span class="text-muted-foreground"
+									>{editRepeatInterval === 1 ? 'day' : 'days'}</span
+								>
+							</div>
+						{/if}
+
+						<!-- Weekly sub-options -->
+						{#if editRepeatFreq === 'weekly'}
+							<div class="space-y-3 rounded-lg bg-muted px-4 py-3">
+								<div class="flex items-center gap-3 text-sm">
+									<span class="text-muted-foreground">Every</span>
+									<input
+										type="number"
+										min="1"
+										max="52"
+										bind:value={editRepeatInterval}
+										class="w-16 rounded-md border border-border bg-background px-2 py-1 text-center text-sm text-foreground focus:border-primary focus:outline-none"
+									/>
+									<span class="text-muted-foreground"
+										>{editRepeatInterval === 1 ? 'week' : 'weeks'} on</span
+									>
+								</div>
+								<div class="flex gap-1.5">
+									{#each DAY_SHORT as label, i (i)}
+										{@const day = i + 1}
+										<button
+											type="button"
+											onclick={() => toggleWeekday(day)}
+											title={DAY_LABELS[i]}
+											class="flex-1 rounded-md py-1.5 text-xs font-medium transition-all {weekdayOn(
+												day
+											)
+												? 'bg-primary text-white shadow-sm'
+												: 'border border-border bg-background text-muted-foreground hover:border-primary/50 hover:text-foreground'}"
+											>{label}</button
+										>
+									{/each}
+								</div>
+								{#if editRepeatWeekdays === 0}
+									<p class="text-xs text-amber-500">Select at least one day.</p>
+								{/if}
+							</div>
+						{/if}
+
+						<!-- Monthly sub-options -->
+						{#if editRepeatFreq === 'monthly'}
+							<div class="space-y-3 rounded-lg bg-muted px-4 py-3">
+								<div class="flex items-center gap-3 text-sm">
+									<span class="text-muted-foreground">Every</span>
+									<input
+										type="number"
+										min="1"
+										max="12"
+										bind:value={editRepeatInterval}
+										class="w-16 rounded-md border border-border bg-background px-2 py-1 text-center text-sm text-foreground focus:border-primary focus:outline-none"
+									/>
+									<span class="text-muted-foreground"
+										>{editRepeatInterval === 1 ? 'month' : 'months'} on days</span
+									>
+								</div>
+								<div class="grid grid-cols-7 gap-1">
+									{#each Array(31) as _, i (i)}
+										{@const day = i + 1}
+										<button
+											type="button"
+											onclick={() => toggleMonthDay(day)}
+											class="aspect-square rounded text-xs font-medium transition-all {monthDayOn(
+												day
+											)
+												? 'bg-primary text-white shadow-sm'
+												: 'border border-border bg-background text-muted-foreground hover:border-primary/50 hover:text-foreground'}"
+											>{day}</button
+										>
+									{/each}
+								</div>
+								{#if editRepeatMonthDays === 0}
+									<p class="text-xs text-amber-500">Select at least one day.</p>
+								{/if}
+							</div>
+						{/if}
+					</div>
+
+					{#if saveError}
+						<p class="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+							{saveError}
+						</p>
+					{/if}
+				</div>
+
+				<!-- ════════════════ SESSIONS TAB ════════════════ -->
+			{:else if activeTab === 'sessions'}
+				{#if sessionsLoading}
+					<div class="py-8 text-center text-sm text-muted-foreground">Loading sessions…</div>
+				{:else if drawerSessions.length === 0}
+					<div class="py-8 text-center">
+						<p class="text-sm text-muted-foreground">No sessions recorded for this instance.</p>
+						<p class="mt-1 text-xs text-muted-foreground">
+							Start a timer from the Today view to log time.
+						</p>
+					</div>
+				{:else}
+					<div class="space-y-1">
+						{#each drawerSessions as s, idx (s.id)}
+							{@const isLive = s.ended_at === null && sessions.active?.id === s.id}
+							{@const dur = isLive ? elapsed : sessionDuration(s)}
+							<div
+								class="flex items-center gap-3 rounded-lg border border-border bg-background px-4 py-3"
+							>
+								<div class="flex-1">
+									<div class="flex items-center gap-2">
+										<span class="text-xs font-medium text-muted-foreground">#{idx + 1}</span>
+										<span class="text-sm text-foreground">{fmtClock(s.started_at)}</span>
+										<span class="text-muted-foreground">→</span>
+										{#if s.ended_at}
+											<span class="text-sm text-foreground">{fmtClock(s.ended_at)}</span>
+										{:else}
+											<span class="text-sm font-medium text-primary">active</span>
+										{/if}
+									</div>
+								</div>
+								<span class="font-mono text-sm {isLive ? 'text-primary' : 'text-foreground'}"
+									>{fmtDuration(dur)}</span
+								>
+							</div>
+						{/each}
+					</div>
+					<div class="mt-4 flex items-center justify-between rounded-lg bg-muted px-4 py-3">
+						<span class="text-sm font-medium text-muted-foreground">Total</span>
+						<span class="font-mono text-sm font-semibold text-foreground"
+							>{fmtDuration(totalSeconds)}</span
+						>
+					</div>
+				{/if}
+
+				<!-- ════════════════ HISTORY TAB ════════════════ -->
+			{:else if activeTab === 'history'}
+				{#if historyLoading}
+					<div class="py-8 text-center text-sm text-muted-foreground">Loading history…</div>
+				{:else if historyItems.length === 0}
+					<div class="py-8 text-center">
+						<p class="text-sm text-muted-foreground">No history yet.</p>
+					</div>
+				{:else}
+					<div class="space-y-1">
+						{#each historyItems as item (item.id)}
+							{@const isCurrent = drawerInstanceId === item.id}
+							<button
+								onclick={() => selectHistoryInstance(item.id)}
+								class="flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left transition-colors {isCurrent
+									? 'border-primary bg-primary/5'
+									: 'border-border bg-background hover:border-foreground/20 hover:bg-accent/30'}"
+							>
+								<div class="flex-1">
+									<span class="text-sm font-medium text-foreground">{item.date}</span>
+								</div>
+								<span
+									class="rounded-full px-2 py-0.5 text-xs font-medium {item.status === 'done'
+										? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+										: item.status === 'skipped'
+											? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+											: 'bg-muted text-muted-foreground'}"
+								>
+									{item.status}
+								</span>
+								{#if isCurrent}
+									<span class="text-xs text-primary">viewing</span>
+								{:else}
+									<span class="text-xs text-muted-foreground">view sessions →</span>
+								{/if}
+							</button>
+						{/each}
+					</div>
+				{/if}
+			{/if}
+		</div>
+
+		<!-- ── Footer ── -->
+		<div class="flex items-center gap-2 border-t border-border px-5 py-4">
+			{#if mode === 'edit' && activeTab === 'edit'}
+				<button
+					type="button"
+					onclick={handleDelete}
+					disabled={deleting}
+					class="rounded-lg border border-destructive/40 px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+				>
+					{deleting ? 'Deleting…' : 'Delete task'}
+				</button>
+			{/if}
+			<div class="flex-1"></div>
+			<button
+				type="button"
+				onclick={() => onclose(false)}
+				class="rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+			>
+				Cancel
+			</button>
+			{#if activeTab === 'edit'}
+				<button
+					type="button"
+					onclick={handleSave}
+					disabled={saving}
+					class="rounded-lg bg-primary px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
+				>
+					{saving ? 'Saving…' : mode === 'add' ? 'Create task' : 'Save changes'}
+				</button>
+			{/if}
+		</div>
+	</div>
+</div>
