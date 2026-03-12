@@ -93,7 +93,7 @@
 			onclick={() => (showAddModal = true)}
 			class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90"
 		>
-			+ New category
+			+ New cat
 		</button>
 	</div>
 
