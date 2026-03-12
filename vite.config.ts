@@ -9,12 +9,16 @@ export default defineConfig({
 		sveltekit(),
 		SvelteKitPWA({
 			registerType: 'autoUpdate',
+			buildBase: '/',
 			manifest: {
 				name: 'Diran',
 				short_name: 'Diran',
 				description: 'Personal app',
 				theme_color: '#4f46e5',
 				background_color: '#ffffff',
+				start_url: '/',
+				display: 'standalone',
+				scope: '/',
 				icons: [
 					{
 						src: '/pwa-192x192.png',
@@ -36,6 +40,9 @@ export default defineConfig({
 			},
 			devOptions: {
 				enabled: true
+			},
+			kit: {
+				includeVersionFile: true
 			}
 		})
 	]
