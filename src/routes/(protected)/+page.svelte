@@ -3,6 +3,7 @@
 	import { tasks } from '$lib/models/tasks.svelte';
 	import { history, type TodayTask } from '$lib/models/history.svelte';
 	import { sessions } from '$lib/models/sessions.svelte';
+	import { progress } from '$lib/models/progress.svelte';
 	import TaskModal from '$lib/components/TaskModal.svelte';
 	import { fly, fade } from 'svelte/transition';
 	import { flip } from 'svelte/animate';
@@ -62,14 +63,17 @@
 
 	async function markDone(todayTask: TodayTask) {
 		await history.markDone(todayTask.task.id);
+		await progress.refreshCategory(todayTask.task.category_id);
 	}
 
 	async function markSkipped(todayTask: TodayTask) {
 		await history.markSkipped(todayTask.task.id);
+		await progress.refreshCategory(todayTask.task.category_id);
 	}
 
 	async function restore(todayTask: TodayTask) {
 		await history.restore(todayTask.task.id);
+		await progress.refreshCategory(todayTask.task.category_id);
 	}
 
 	async function onModalClose(changed: boolean) {

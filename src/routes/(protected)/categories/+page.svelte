@@ -1,31 +1,59 @@
 <script lang="ts">
 	import { categories } from '$lib/models/categories.svelte';
-	import { getGoalProgress } from '$lib/models/progress';
+	import { tasks } from '$lib/models/tasks.svelte';
+	import { sessions } from '$lib/models/sessions.svelte';
+	import { progress } from '$lib/models/progress.svelte';
 	import CategoryModal from '$lib/components/CategoryModal.svelte';
 	import type { GoalType, GoalPeriod } from '$lib/types';
 
-	let progress = $state<Record<string, { current: number; target: number }>>({});
 	let showAddModal = $state(false);
 
 	$effect(() => {
-		categories.fetch().then(() => loadProgress());
+		categories.fetch().then(async () => {
+			await tasks.fetch();
+			await progress.refresh();
+		});
 	});
 
-	async function loadProgress() {
+	// Tick `now` every second only while a session is active, so the
+	// categories page progress bars update in real-time.
+	let now = $state(Math.floor(Date.now() / 1000));
+	$effect(() => {
+		if (!sessions.active) return;
+		const interval = setInterval(() => {
+			now = Math.floor(Date.now() / 1000);
+		}, 1000);
+		return () => clearInterval(interval);
+	});
+
+	// Overlay live elapsed time on the DB snapshot for the active session's category.
+	const liveValues = $derived.by(() => {
 		const result: Record<string, { current: number; target: number }> = {};
 		for (const cat of categories.items) {
-			result[cat.id] = await getGoalProgress(cat);
+			const base = progress.values[cat.id];
+			if (!base) continue;
+			if (cat.goal_type === 'seconds' && sessions.active) {
+				const activeTask = tasks.items.find((t) => t.id === sessions.active!.task_id);
+				if (activeTask?.category_id === cat.id) {
+					result[cat.id] = {
+						current: base.current + (now - sessions.active.started_at),
+						target: base.target
+					};
+					continue;
+				}
+			}
+			result[cat.id] = base;
 		}
-		progress = result;
-	}
+		return result;
+	});
 
 	async function onModalClose(changed: boolean) {
 		showAddModal = false;
-		if (changed) await loadProgress();
+		if (changed) await progress.refresh();
 	}
 
 	function progressPercent(catId: string): number {
-		const p = progress[catId];
+		const p = liveValues[catId];
 		if (!p || p.target === 0) return 0;
 		return Math.min(Math.round((p.current / p.target) * 100), 100);
 	}
@@ -118,7 +146,7 @@
 		<div class="space-y-2">
 			{#each categories.items as cat (cat.id)}
 				{@const pct = progressPercent(cat.id)}
-				{@const p = progress[cat.id]}
+				{@const p = liveValues[cat.id]}
 				<a
 					href="/categories/{cat.id}"
 					class="block rounded-xl border border-border bg-card px-4 py-3.5 transition-colors hover:border-foreground/20"

@@ -1,13 +1,48 @@
 import { supabase } from '$lib/supabase';
 import type { Category } from '$lib/types';
+import { categories } from './categories.svelte';
+
+/**
+ * Progress store that caches completed-session values.
+ * Live elapsed time for an active session is added in the UI via a $derived.
+ */
+class ProgressStore {
+	values = $state<Record<string, { current: number; target: number }>>({});
+	loading = $state(false);
+
+	async refresh() {
+		this.loading = true;
+		const newValues: Record<string, { current: number; target: number }> = {};
+
+		for (const cat of categories.items) {
+			newValues[cat.id] = await getGoalProgressForCategory(cat);
+		}
+
+		this.values = newValues;
+		this.loading = false;
+	}
+
+	async refreshCategory(categoryId: string) {
+		const cat = categories.items.find((c) => c.id === categoryId);
+		if (!cat) return;
+		this.values[categoryId] = await getGoalProgressForCategory(cat);
+	}
+
+	get(categoryId: string): { current: number; target: number } | undefined {
+		return this.values[categoryId];
+	}
+}
+
+export const progress = new ProgressStore();
 
 /**
  * Calculate goal progress for a category within its goal period.
- * Returns current value and target (goal_value).
+ * Returns current (completed sessions only) and target (goal_value).
  * For 'times': counts done_dates entries within the period.
- * For 'seconds': sums session durations for tasks in the category within the period.
+ * For 'seconds': sums completed session durations for tasks in the category.
+ * Live elapsed time for any active session is added in the UI via a $derived.
  */
-export async function getGoalProgress(
+async function getGoalProgressForCategory(
 	category: Category
 ): Promise<{ current: number; target: number }> {
 	const now = new Date();
@@ -64,7 +99,7 @@ export async function getGoalProgress(
 			.lt('started_at', periodEndUnix)
 			.not('ended_at', 'is', null);
 
-		const totalSeconds = (sessionData ?? []).reduce((sum, s) => {
+		let totalSeconds = (sessionData ?? []).reduce((sum, s) => {
 			const row = s as { started_at: number; ended_at: number };
 			return sum + (row.ended_at - row.started_at);
 		}, 0);
