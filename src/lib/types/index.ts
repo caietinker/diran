@@ -22,6 +22,8 @@ export interface Task {
 	repeat_interval: number | null;
 	repeat_weekdays: number | null; // 7-bit mask: bit0=Mon, bit6=Sun
 	repeat_month_days: number | null; // 31-bit mask: bit0=day1, bit30=day31
+	start_date: number | null; // Unix timestamp (midnight) for once-time or start of repeat
+	end_date: number | null; // Unix timestamp (midnight) for end of repeat
 }
 
 export interface Instance {

@@ -45,6 +45,19 @@
 	let editRepeatInterval = $state(untrack(() => task?.repeat_interval ?? 1));
 	let editRepeatWeekdays = $state(untrack(() => task?.repeat_weekdays ?? 0));
 	let editRepeatMonthDays = $state(untrack(() => task?.repeat_month_days ?? 0));
+	// Date inputs (stored as YYYY-MM-DD strings for input fields)
+	let editStartDate = $state(
+		untrack(() => {
+			if (!task?.start_date) return '';
+			return new Date(task.start_date * 1000).toISOString().split('T')[0];
+		})
+	);
+	let editEndDate = $state(
+		untrack(() => {
+			if (!task?.end_date) return '';
+			return new Date(task.end_date * 1000).toISOString().split('T')[0];
+		})
+	);
 	let saving = $state(false);
 	let saveError = $state('');
 	let deleting = $state(false);
@@ -127,6 +140,14 @@
 
 		const freq = editRepeatFreq === '' ? null : (editRepeatFreq as RepeatFreq);
 
+		// Convert date strings to Unix timestamps (midnight)
+		const startDateUnix = editStartDate
+			? Math.floor(new Date(editStartDate + 'T00:00:00').getTime() / 1000)
+			: null;
+		const endDateUnix = editEndDate
+			? Math.floor(new Date(editEndDate + 'T00:00:00').getTime() / 1000)
+			: null;
+
 		if (mode === 'add') {
 			const newTask = await tasks.add({
 				category_id: editCategoryId,
@@ -135,11 +156,13 @@
 				repeat_freq: freq,
 				repeat_interval: freq ? editRepeatInterval : null,
 				repeat_weekdays: freq === 'weekly' ? editRepeatWeekdays : null,
-				repeat_month_days: freq === 'monthly' ? editRepeatMonthDays : null
+				repeat_month_days: freq === 'monthly' ? editRepeatMonthDays : null,
+				start_date: startDateUnix,
+				end_date: endDateUnix
 			});
-			// If no repeat (one-off), immediately create an instance for today
+			// If no repeat (one-off), immediately create an instance for the selected date
 			if (!freq && newTask) {
-				await instances.addOneOff(newTask.id);
+				await instances.addOneOff(newTask.id, startDateUnix);
 			}
 		} else if (task) {
 			await tasks.update(task.id, {
@@ -149,7 +172,9 @@
 				repeat_freq: freq,
 				repeat_interval: freq ? editRepeatInterval : null,
 				repeat_weekdays: freq === 'weekly' ? editRepeatWeekdays : null,
-				repeat_month_days: freq === 'monthly' ? editRepeatMonthDays : null
+				repeat_month_days: freq === 'monthly' ? editRepeatMonthDays : null,
+				start_date: startDateUnix,
+				end_date: endDateUnix
 			});
 		}
 
@@ -416,6 +441,42 @@
 							{#if editRepeatMonthDays === 0}
 								<p class="text-xs text-amber-500">Select at least one day.</p>
 							{/if}
+						</div>
+					{/if}
+
+					<!-- Once: specific date picker -->
+					{#if editRepeatFreq === ''}
+						<div class="rounded-lg bg-muted px-4 py-3">
+							<label class="flex items-center gap-3 text-sm">
+								<span class="text-muted-foreground">Date</span>
+								<input
+									type="date"
+									bind:value={editStartDate}
+									class="flex-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none"
+								/>
+							</label>
+						</div>
+					{/if}
+
+					<!-- Start/End date for repeating tasks -->
+					{#if editRepeatFreq !== ''}
+						<div class="grid grid-cols-2 gap-3 rounded-lg bg-muted px-4 py-3">
+							<div class="space-y-1">
+								<label class="text-xs text-muted-foreground">Start date</label>
+								<input
+									type="date"
+									bind:value={editStartDate}
+									class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none"
+								/>
+							</div>
+							<div class="space-y-1">
+								<label class="text-xs text-muted-foreground">End date</label>
+								<input
+									type="date"
+									bind:value={editEndDate}
+									class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none"
+								/>
+							</div>
 						</div>
 					{/if}
 				</div>

@@ -11,6 +11,19 @@ function shouldFireToday(task: Task): boolean {
 	if (!task.repeat_freq) return false;
 
 	const today = new Date();
+	const todayUnix = Math.floor(today.getTime() / 1000);
+	const todayMidnight = Math.floor(today.setHours(0, 0, 0, 0) / 1000);
+
+	// Check if task has started
+	if (task.start_date && todayUnix < task.start_date) {
+		return false;
+	}
+
+	// Check if task has ended
+	if (task.end_date && todayUnix >= task.end_date) {
+		return false;
+	}
+
 	const dayOfWeek = today.getDay() === 0 ? 7 : today.getDay(); // 1=Mon..7=Sun
 	const dayOfMonth = today.getDate();
 	const monthNum = today.getMonth() + 1; // 1-12
@@ -126,11 +139,15 @@ class InstanceStore {
 		}
 	}
 
-	async addOneOff(taskId: string) {
+	async addOneOff(taskId: string, startDateUnix: number | null = null) {
 		const today = todayStr();
+		// If startDateUnix provided, use that date; otherwise use today
+		const instanceDate = startDateUnix
+			? new Date(startDateUnix * 1000).toISOString().slice(0, 10)
+			: today;
 		const { data, error } = await supabase
 			.from('instance')
-			.insert({ task_id: taskId, date: today, status: 'pending' as const })
+			.insert({ task_id: taskId, date: instanceDate, status: 'pending' as const })
 			.select('*, task!inner(*, category!inner(*))')
 			.single();
 		if (!error && data) {
