@@ -54,8 +54,9 @@
 	let deleting = $state(false);
 
 	// ─── Sessions tab state ────────────────────────────────────────────────────
-	let drawerTaskId = $state<string | null>(untrack(() => task?.id ?? null));
+	let activeTaskId = $state<string | null>(untrack(() => task?.id ?? null));
 	let drawerSessions = $state<Session[]>([]);
+	let selectedHistoryItemId = $state<string | null>(null);
 	let sessionsLoading = $state(false);
 
 	// ─── History tab state ─────────────────────────────────────────────────────
@@ -74,9 +75,20 @@
 		}
 	});
 
-	async function loadSessions(taskId: string) {
+	async function loadSessions(taskId: string, filterDateUnix?: number) {
 		sessionsLoading = true;
-		drawerSessions = await sessions.fetchForTask(taskId);
+		let allSessions = await sessions.fetchForTask(taskId);
+
+		// If a date is provided, filter sessions to that specific date
+		if (filterDateUnix !== undefined) {
+			const dayStart = filterDateUnix;
+			const dayEnd = filterDateUnix + 86400; // next day's midnight
+			allSessions = allSessions.filter(
+				(s: { started_at: number }) => s.started_at >= dayStart && s.started_at < dayEnd
+			);
+		}
+
+		drawerSessions = allSessions;
 		sessionsLoading = false;
 	}
 
@@ -86,17 +98,19 @@
 		historyLoading = false;
 	}
 
-	async function selectHistoryInstance(instId: string) {
-		drawerTaskId = instId;
+	async function selectHistoryItem(itemId: string) {
+		selectedHistoryItemId = itemId;
 		activeTab = 'sessions';
-		await loadSessions(instId);
+		// itemId is the Unix timestamp (e.g. "1709539200") — parse and filter sessions to that date
+		const filterDateUnix = parseInt(itemId, 10);
+		if (task) await loadSessions(task.id, filterDateUnix);
 	}
 
 	// ─── Re-fetch sessions when active session changes ────────────────────────
 	$effect(() => {
 		const _active = sessions.active;
-		if (drawerTaskId && activeTab === 'sessions') {
-			loadSessions(drawerTaskId);
+		if (activeTaskId && activeTab === 'sessions') {
+			loadSessions(activeTaskId);
 		}
 	});
 
@@ -138,7 +152,7 @@
 			: null;
 
 		if (mode === 'add') {
-			const newTask = await tasks.add({
+			await tasks.add({
 				category_id: editCategoryId,
 				name: editName.trim(),
 				description: editDescription.trim() || null,
@@ -205,7 +219,7 @@
 	);
 
 	// ─── Derived display helpers ──────────────────────────────────────────────
-	const hasInstance = $derived(mode === 'edit' && task !== null);
+	const hasExistingTask = $derived(mode === 'edit' && task !== null);
 	const selectedCategory = $derived(categories.items.find((c) => c.id === editCategoryId));
 </script>
 
@@ -248,8 +262,8 @@
 		{/if}
 	{/snippet}
 
-	<!-- ── Tabs (only show Sessions + History in edit mode with an instance) ── -->
-	{#if hasInstance}
+	<!-- ── Tabs (only show Sessions + History in edit mode with an existing task) ── -->
+	{#if hasExistingTask}
 		<div class="flex border-b border-border px-5">
 			{#each ['edit', 'sessions', 'history'] as Tab[] as tab (tab)}
 				<button
@@ -449,16 +463,20 @@
 					{#if editRepeatFreq !== ''}
 						<div class="grid grid-cols-2 gap-3 rounded-lg bg-muted px-4 py-3">
 							<div class="space-y-1">
-								<label class="text-xs text-muted-foreground">Start date</label>
+								<label for="repeat-start-date" class="text-xs text-muted-foreground"
+									>Start date</label
+								>
 								<input
+									id="repeat-start-date"
 									type="date"
 									bind:value={editStartDate}
 									class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none"
 								/>
 							</div>
 							<div class="space-y-1">
-								<label class="text-xs text-muted-foreground">End date</label>
+								<label for="repeat-end-date" class="text-xs text-muted-foreground">End date</label>
 								<input
+									id="repeat-end-date"
 									type="date"
 									bind:value={editEndDate}
 									class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none"
@@ -531,9 +549,9 @@
 			{:else}
 				<div class="space-y-1">
 					{#each historyItems as item (item.id)}
-						{@const isCurrent = drawerTaskId === item.id}
+						{@const isCurrent = selectedHistoryItemId === item.id}
 						<button
-							onclick={() => selectHistoryInstance(item.id)}
+							onclick={() => selectHistoryItem(item.id)}
 							class="flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left transition-colors {isCurrent
 								? 'border-primary bg-primary/5'
 								: 'border-border bg-background hover:border-foreground/20 hover:bg-accent/30'}"

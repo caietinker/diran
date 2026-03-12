@@ -3,57 +3,65 @@ import type { Category } from '$lib/types';
 
 /**
  * Calculate goal progress for a category within its goal period.
- * Returns a number between 0 and 1 (or > 1 if exceeded).
+ * Returns current value and target (goal_value).
+ * For 'times': counts done_dates entries within the period.
+ * For 'seconds': sums session durations for tasks in the category within the period.
  */
 export async function getGoalProgress(
 	category: Category
 ): Promise<{ current: number; target: number }> {
 	const now = new Date();
-	let periodStart: string;
+	let periodStartUnix: number;
 
 	if (category.goal_period === 'week') {
 		const day = now.getDay() === 0 ? 7 : now.getDay();
 		const monday = new Date(now);
 		monday.setDate(now.getDate() - (day - 1));
-		periodStart = monday.toISOString().slice(0, 10);
+		monday.setHours(0, 0, 0, 0);
+		periodStartUnix = Math.floor(monday.getTime() / 1000);
 	} else if (category.goal_period === 'month') {
-		periodStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+		const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+		periodStartUnix = Math.floor(firstOfMonth.getTime() / 1000);
 	} else {
 		// year
-		periodStart = `${now.getFullYear()}-01-01`;
+		const firstOfYear = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+		periodStartUnix = Math.floor(firstOfYear.getTime() / 1000);
 	}
 
-	const today = now.toISOString().slice(0, 10);
+	const todayMidnight = new Date(now);
+	todayMidnight.setHours(0, 0, 0, 0);
+	const todayUnix = Math.floor(todayMidnight.getTime() / 1000);
+	// Include today fully (period end = start of tomorrow)
+	const periodEndUnix = todayUnix + 86400;
+
+	// Fetch all tasks in this category
+	const { data: taskData } = await supabase
+		.from('task')
+		.select('id, done_dates')
+		.eq('category_id', category.id);
+
+	const tasks = taskData ?? [];
+
+	if (tasks.length === 0) return { current: 0, target: category.goal_value };
 
 	if (category.goal_type === 'times') {
-		const { count } = await supabase
-			.from('instance')
-			.select('id', { count: 'exact', head: true })
-			.eq('status', 'done')
-			.gte('date', periodStart)
-			.lte('date', today)
-			.in(
-				'task_id',
-				(await supabase.from('task').select('id').eq('category_id', category.id)).data?.map(
-					(t) => t.id
-				) ?? []
-			);
-		return { current: count ?? 0, target: category.goal_value };
+		// Count done_dates entries within [periodStartUnix, periodEndUnix)
+		let count = 0;
+		for (const task of tasks) {
+			const dates: number[] = task.done_dates ?? [];
+			count += dates.filter((d) => d >= periodStartUnix && d < periodEndUnix).length;
+		}
+		return { current: count, target: category.goal_value };
 	} else {
-		// seconds: sum (ended_at - started_at) for all sessions in period
-		const taskIds =
-			(await supabase.from('task').select('id').eq('category_id', category.id)).data?.map(
-				(t) => t.id
-			) ?? [];
-
-		if (taskIds.length === 0) return { current: 0, target: category.goal_value };
+		// seconds: sum (ended_at - started_at) for all completed sessions in period
+		const taskIds = tasks.map((t) => t.id);
 
 		const { data: sessionData } = await supabase
 			.from('session')
-			.select('started_at, ended_at, instance!inner(task_id, date)')
-			.gte('instance.date', periodStart)
-			.lte('instance.date', today)
-			.in('instance.task_id', taskIds)
+			.select('started_at, ended_at')
+			.in('task_id', taskIds)
+			.gte('started_at', periodStartUnix)
+			.lt('started_at', periodEndUnix)
 			.not('ended_at', 'is', null);
 
 		const totalSeconds = (sessionData ?? []).reduce((sum, s) => {

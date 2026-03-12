@@ -1,7 +1,6 @@
 export type GoalType = 'times' | 'seconds';
 export type GoalPeriod = 'week' | 'month' | 'year';
 export type RepeatFreq = 'daily' | 'weekly' | 'monthly';
-export type InstanceStatus = 'pending' | 'done' | 'skipped';
 
 export interface Category {
 	id: string;
@@ -28,23 +27,6 @@ export interface Task {
 	skipped_dates: number[]; // Unix timestamps (midnight) for skipped dates
 }
 
-export interface History {
-	id: string;
-	task_id: string;
-	date: string; // YYYY-MM-DD
-	status: 'done' | 'skipped';
-	created_at: string;
-}
-
-// Legacy: Instance is kept for backward compatibility during migration
-// New code should use Task.done_dates/skipped_dates + compute on the fly
-export interface Instance {
-	id: string;
-	task_id: string;
-	date: string;
-	status: InstanceStatus;
-}
-
 export interface Session {
 	id: string;
 	task_id: string;
@@ -55,12 +37,4 @@ export interface Session {
 // Joined types for UI
 export interface TaskWithCategory extends Task {
 	category: Category;
-}
-
-export interface InstanceWithTask extends Instance {
-	task: TaskWithCategory;
-}
-
-export interface SessionWithInstance extends Session {
-	instance: Instance;
 }

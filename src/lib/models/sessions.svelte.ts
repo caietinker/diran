@@ -23,7 +23,6 @@ class SessionStore {
 			.update({ ended_at: now })
 			.eq('id', this.active.id);
 		if (!error) {
-			this.active = { ...this.active, ended_at: now };
 			this.active = null;
 		}
 	}
