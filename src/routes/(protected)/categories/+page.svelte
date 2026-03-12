@@ -1,19 +1,11 @@
 <script lang="ts">
 	import { categories } from '$lib/models/categories.svelte';
 	import { getGoalProgress } from '$lib/models/progress';
-	import Button from '$lib/components/ui/button/index.svelte';
+	import CategoryModal from '$lib/components/CategoryModal.svelte';
 	import type { GoalType, GoalPeriod } from '$lib/types';
 
-	let showForm = $state(false);
-	let name = $state('');
-	let color = $state('#ff6600');
-	let goalType = $state<GoalType>('times');
-	let goalTimes = $state(1);
-	let goalHours = $state(0);
-	let goalMinutes = $state(30);
-	let goalPeriod = $state<GoalPeriod>('week');
-
 	let progress = $state<Record<string, { current: number; target: number }>>({});
+	let showAddModal = $state(false);
 
 	$effect(() => {
 		categories.fetch().then(() => loadProgress());
@@ -27,44 +19,24 @@
 		progress = result;
 	}
 
-	function getGoalValue(): number {
-		if (goalType === 'times') return goalTimes;
-		return goalHours * 3600 + goalMinutes * 60;
-	}
-
-	async function handleCreate(e: Event) {
-		e.preventDefault();
-		await categories.add({
-			name,
-			color,
-			goal_type: goalType,
-			goal_value: getGoalValue(),
-			goal_period: goalPeriod
-		});
-		name = '';
-		color = '#ff6600';
-		goalType = 'times';
-		goalTimes = 1;
-		goalHours = 0;
-		goalMinutes = 30;
-		goalPeriod = 'week';
-		showForm = false;
-		await loadProgress();
-	}
-
-	function formatGoal(type: GoalType, value: number, period: GoalPeriod): string {
-		if (type === 'times') return `${value}x / ${period}`;
-		const h = Math.floor(value / 3600);
-		const m = Math.floor((value % 3600) / 60);
-		if (h > 0 && m > 0) return `${h}h ${m}m / ${period}`;
-		if (h > 0) return `${h}h / ${period}`;
-		return `${m}m / ${period}`;
+	async function onModalClose(changed: boolean) {
+		showAddModal = false;
+		if (changed) await loadProgress();
 	}
 
 	function progressPercent(catId: string): number {
 		const p = progress[catId];
 		if (!p || p.target === 0) return 0;
 		return Math.min(Math.round((p.current / p.target) * 100), 100);
+	}
+
+	function formatGoal(type: GoalType, value: number, period: GoalPeriod): string {
+		if (type === 'times') return `${value}× / ${period}`;
+		const h = Math.floor(value / 3600);
+		const m = Math.floor((value % 3600) / 60);
+		if (h > 0 && m > 0) return `${h}h ${m}m / ${period}`;
+		if (h > 0) return `${h}h / ${period}`;
+		return `${m}m / ${period}`;
 	}
 
 	function formatCurrent(type: GoalType, current: number): string {
@@ -77,111 +49,70 @@
 	}
 </script>
 
-<main class="mx-auto max-w-lg p-4">
-	<div class="mb-6 flex items-center justify-between">
-		<h1 class="text-xl font-semibold text-foreground">Categories</h1>
-		<button onclick={() => (showForm = !showForm)} class="text-sm text-primary hover:underline">
-			{showForm ? 'cancel' : '+ new'}
+<!-- ── Modal ── -->
+{#if showAddModal}
+	<CategoryModal mode="add" onclose={onModalClose} />
+{/if}
+
+<main class="mx-auto max-w-2xl px-4 py-6">
+	<!-- ── Header ── -->
+	<div class="mb-6 flex items-end justify-between">
+		<div>
+			<h1 class="text-2xl font-semibold tracking-tight text-foreground">Categories</h1>
+			<p class="mt-0.5 text-sm text-muted-foreground">Organise your tasks by area of focus</p>
+		</div>
+		<button
+			onclick={() => (showAddModal = true)}
+			class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90"
+		>
+			+ New category
 		</button>
 	</div>
 
-	{#if showForm}
-		<form onsubmit={handleCreate} class="mb-6 space-y-4 rounded border border-border bg-card p-4">
-			<input
-				type="text"
-				bind:value={name}
-				required
-				placeholder="Category name"
-				class="w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground"
-			/>
-
-			<div class="flex gap-2">
-				{#each ['#ff6600', '#22c55e', '#3b82f6', '#a855f7', '#ef4444', '#eab308'] as c}
-					<button
-						type="button"
-						onclick={() => (color = c)}
-						aria-label="Select color {c}"
-						class="h-6 w-6 rounded-full {color === c ? 'ring-1 ring-foreground ring-offset-1' : ''}"
-						style="background-color: {c}"
-					></button>
-				{/each}
-			</div>
-
-			<div class="flex gap-2">
-				<button
-					type="button"
-					onclick={() => (goalType = 'times')}
-					class="flex-1 rounded border py-1.5 text-xs {goalType === 'times'
-						? 'bg-foreground text-background'
-						: 'border-border text-muted-foreground'}"
-				>
-					Times
-				</button>
-				<button
-					type="button"
-					onclick={() => (goalType = 'seconds')}
-					class="flex-1 rounded border py-1.5 text-xs {goalType === 'seconds'
-						? 'bg-foreground text-background'
-						: 'border-border text-muted-foreground'}"
-				>
-					Duration
-				</button>
-			</div>
-
-			{#if goalType === 'times'}
-				<div class="flex gap-2">
-					<input
-						type="number"
-						min="1"
-						bind:value={goalTimes}
-						class="w-20 rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground"
-					/>
-					<select
-						bind:value={goalPeriod}
-						class="flex-1 rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground"
-					>
-						<option value="week">Week</option>
-						<option value="month">Month</option>
-						<option value="year">Year</option>
-					</select>
-				</div>
-			{:else}
-				<div class="flex gap-2">
-					<input
-						type="number"
-						min="0"
-						bind:value={goalHours}
-						placeholder="h"
-						class="w-16 rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground"
-					/>
-					<input
-						type="number"
-						min="0"
-						max="59"
-						bind:value={goalMinutes}
-						placeholder="m"
-						class="w-16 rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground"
-					/>
-					<select
-						bind:value={goalPeriod}
-						class="flex-1 rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground"
-					>
-						<option value="week">Week</option>
-						<option value="month">Month</option>
-						<option value="year">Year</option>
-					</select>
-				</div>
-			{/if}
-
-			<Button type="submit" class="w-full">Create</Button>
-		</form>
-	{/if}
-
 	{#if categories.loading}
-		<p class="py-8 text-center text-muted-foreground">Loading...</p>
+		<!-- Loading skeletons -->
+		<div class="space-y-2">
+			{#each Array(3) as _, i (i)}
+				<div class="animate-pulse rounded-xl border border-border bg-card px-4 py-4">
+					<div class="flex items-center gap-3">
+						<div class="h-3 w-3 rounded-full bg-muted"></div>
+						<div class="h-4 w-32 rounded bg-muted"></div>
+						<div class="ml-auto h-3 w-8 rounded bg-muted"></div>
+					</div>
+					<div class="mt-3 h-1.5 rounded-full bg-muted"></div>
+				</div>
+			{/each}
+		</div>
 	{:else if categories.items.length === 0}
-		<div class="rounded border border-border bg-card p-8 text-center">
-			<p class="text-muted-foreground">No categories</p>
+		<!-- Empty state -->
+		<div class="rounded-xl border border-border bg-card px-6 py-16 text-center">
+			<div
+				class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10"
+			>
+				<svg
+					class="h-7 w-7 text-primary"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+					stroke-width="1.5"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z"
+					/>
+				</svg>
+			</div>
+			<p class="text-base font-medium text-foreground">No categories yet</p>
+			<p class="mt-1 text-sm text-muted-foreground">
+				Create a category to start organising your tasks and tracking goals.
+			</p>
+			<button
+				onclick={() => (showAddModal = true)}
+				class="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90"
+			>
+				Create your first category
+			</button>
 		</div>
 	{:else}
 		<div class="space-y-2">
@@ -190,17 +121,31 @@
 				{@const p = progress[cat.id]}
 				<a
 					href="/categories/{cat.id}"
-					class="block rounded border border-border bg-card p-3 hover:border-primary/50"
+					class="block rounded-xl border border-border bg-card px-4 py-3.5 transition-colors hover:border-foreground/20"
 				>
-					<div class="flex items-center justify-between">
-						<div class="flex items-center gap-2">
-							<div class="h-3 w-3 rounded-full" style="background-color: {cat.color}"></div>
-							<span class="font-medium text-foreground">{cat.name}</span>
+					<div class="flex items-center gap-3">
+						<div class="h-3 w-3 shrink-0 rounded-full" style="background-color: {cat.color}"></div>
+						<div class="min-w-0 flex-1">
+							<span class="text-sm font-medium text-foreground">{cat.name}</span>
 						</div>
-						<span class="text-xs text-muted-foreground">{pct}%</span>
+						<div class="flex items-center gap-3">
+							{#if p}
+								<span class="text-xs text-muted-foreground">
+									{formatCurrent(cat.goal_type, p.current)} / {formatGoal(
+										cat.goal_type,
+										cat.goal_value,
+										cat.goal_period
+									)}
+								</span>
+							{/if}
+							<span class="text-xs font-medium text-muted-foreground">{pct}%</span>
+						</div>
 					</div>
-					<div class="mt-2 h-1 overflow-hidden rounded-full bg-muted">
-						<div class="h-full bg-primary" style="width: {pct}%"></div>
+					<div class="mt-2.5 h-1 overflow-hidden rounded-full bg-muted">
+						<div
+							class="h-full rounded-full bg-primary transition-all duration-500"
+							style="width: {pct}%"
+						></div>
 					</div>
 				</a>
 			{/each}

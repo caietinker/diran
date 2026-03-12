@@ -5,6 +5,8 @@
 	import { sessions } from '$lib/models/sessions.svelte';
 	import TaskModal from '$lib/components/TaskModal.svelte';
 	import type { InstanceWithTask } from '$lib/types';
+	import { fly, fade } from 'svelte/transition';
+	import { flip } from 'svelte/animate';
 
 	// ─── Timer ────────────────────────────────────────────────────────────────
 	let elapsed = $state(0);
@@ -128,14 +130,54 @@
 	</div>
 
 	{#if instances.loading}
-		<div class="py-16 text-center text-muted-foreground">Loading…</div>
+		<!-- Loading skeletons -->
+		<div class="space-y-2">
+			{#each Array(4) as _, i (i)}
+				<div class="animate-pulse rounded-xl border border-border bg-card px-4 py-3">
+					<div class="flex items-center gap-3">
+						<div class="h-2.5 w-2.5 rounded-full bg-muted"></div>
+						<div class="flex-1 space-y-1.5">
+							<div class="h-3.5 w-40 rounded bg-muted"></div>
+							<div class="h-3 w-24 rounded bg-muted"></div>
+						</div>
+						<div class="h-7 w-16 rounded-lg bg-muted"></div>
+						<div class="h-7 w-8 rounded-lg bg-muted"></div>
+						<div class="h-7 w-8 rounded-lg bg-muted"></div>
+					</div>
+				</div>
+			{/each}
+		</div>
 	{:else if instances.items.length === 0}
-		<div class="rounded-xl border border-border bg-card px-6 py-12 text-center">
-			<p class="text-base font-medium text-foreground">Nothing scheduled today</p>
+		<!-- Empty state -->
+		<div class="rounded-xl border border-border bg-card px-6 py-16 text-center">
+			<div
+				class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10"
+			>
+				<svg
+					class="h-7 w-7 text-primary"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+					stroke-width="1.5"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"
+					/>
+				</svg>
+			</div>
+			<p class="text-base font-medium text-foreground">Nothing scheduled for today</p>
 			<p class="mt-1 text-sm text-muted-foreground">
-				<a href="/categories" class="text-primary hover:underline">Set up categories</a> or add a one-off
-				task to get started.
+				Add a one-off task or
+				<a href="/categories" class="text-primary hover:underline">set up repeating tasks</a> in a category.
 			</p>
+			<button
+				onclick={() => (modal = { mode: 'add' })}
+				class="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90"
+			>
+				+ Add a task
+			</button>
 		</div>
 	{:else}
 		<!-- ── Pending tasks ── -->
@@ -144,6 +186,8 @@
 				{#each pending as inst (inst.id)}
 					{@const isActive = sessions.active?.instance_id === inst.id}
 					<div
+						transition:fly={{ x: -12, duration: 200 }}
+						animate:flip={{ duration: 200 }}
 						class="group flex items-center gap-3 rounded-xl border bg-card px-4 py-3 transition-colors {isActive
 							? 'border-primary shadow-sm'
 							: 'border-border hover:border-foreground/20'}"
@@ -208,13 +252,15 @@
 
 		<!-- ── Done tasks ── -->
 		{#if done.length > 0}
-			<div class="mt-8">
+			<div class="mt-8" transition:fade={{ duration: 150 }}>
 				<p class="mb-2 text-xs font-semibold tracking-widest text-muted-foreground uppercase">
 					Done ({done.length})
 				</p>
 				<div class="space-y-1.5">
 					{#each done as inst (inst.id)}
 						<div
+							transition:fly={{ x: 12, duration: 200 }}
+							animate:flip={{ duration: 200 }}
 							class="group flex items-center gap-3 rounded-xl border border-border bg-card/60 px-4 py-2.5 opacity-60 transition-opacity hover:opacity-90"
 						>
 							<div
@@ -242,13 +288,15 @@
 
 		<!-- ── Skipped tasks ── -->
 		{#if skipped.length > 0}
-			<div class="mt-6">
+			<div class="mt-6" transition:fade={{ duration: 150 }}>
 				<p class="mb-2 text-xs font-semibold tracking-widest text-muted-foreground uppercase">
 					Skipped ({skipped.length})
 				</p>
 				<div class="space-y-1.5">
 					{#each skipped as inst (inst.id)}
 						<div
+							transition:fly={{ x: 12, duration: 200 }}
+							animate:flip={{ duration: 200 }}
 							class="group flex items-center gap-3 rounded-xl border border-border bg-card/40 px-4 py-2.5 opacity-50 transition-opacity hover:opacity-80"
 						>
 							<div

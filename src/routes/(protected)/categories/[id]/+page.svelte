@@ -3,15 +3,17 @@
 	import { goto } from '$app/navigation';
 	import { categories } from '$lib/models/categories.svelte';
 	import { tasks } from '$lib/models/tasks.svelte';
-	import { instances } from '$lib/models/instances.svelte';
 	import TaskModal from '$lib/components/TaskModal.svelte';
+	import CategoryModal from '$lib/components/CategoryModal.svelte';
 	import type { Category, Task } from '$lib/types';
 
 	let category = $state<Category | null>(null);
 	let categoryTasks = $derived(tasks.items.filter((t) => t.category_id === category?.id));
 
-	// null = closed; 'add' = new task modal; task = edit that task
-	let modal = $state<null | 'add' | Task>(null);
+	// Task modal: null = closed; 'add' = new task; task = edit that task
+	let taskModal = $state<null | 'add' | Task>(null);
+	// Category modal: null = closed; true = edit current category
+	let catModal = $state(false);
 
 	const dayFull = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -27,15 +29,22 @@
 		if (!category) void goto('/categories');
 	}
 
-	async function onModalClose(changed: boolean) {
-		modal = null;
+	async function onTaskModalClose(changed: boolean) {
+		taskModal = null;
 		if (changed) await loadCategory();
 	}
 
-	async function handleDeleteCategory() {
-		if (category) {
-			await categories.remove(category.id);
-			void goto('/categories');
+	async function onCatModalClose(changed: boolean) {
+		catModal = false;
+		if (changed) {
+			// If category was deleted, categories.items won't have it anymore
+			const id = page.params.id;
+			const still = categories.items.find((c) => c.id === id);
+			if (!still) {
+				void goto('/categories');
+			} else {
+				await loadCategory();
+			}
 		}
 	}
 
@@ -70,13 +79,18 @@
 	}
 </script>
 
-<!-- ── Modal ── -->
-{#if modal !== null}
-	{#if modal === 'add'}
-		<TaskModal mode="add" defaultCategoryId={category?.id ?? ''} onclose={onModalClose} />
+<!-- ── Task modal ── -->
+{#if taskModal !== null}
+	{#if taskModal === 'add'}
+		<TaskModal mode="add" defaultCategoryId={category?.id ?? ''} onclose={onTaskModalClose} />
 	{:else}
-		<TaskModal mode="edit" task={modal} onclose={onModalClose} />
+		<TaskModal mode="edit" task={taskModal} onclose={onTaskModalClose} />
 	{/if}
+{/if}
+
+<!-- ── Category edit modal ── -->
+{#if catModal && category}
+	<CategoryModal mode="edit" {category} onclose={onCatModalClose} />
 {/if}
 
 {#if category}
@@ -86,11 +100,21 @@
 			<a href="/categories" class="text-sm text-muted-foreground hover:text-foreground"
 				>&larr; Back to categories</a
 			>
-			<div class="mt-3 flex items-center gap-3">
-				<div class="h-5 w-5 rounded-md" style="background-color: {category.color}"></div>
-				<h1 class="text-2xl font-semibold tracking-tight text-foreground">{category.name}</h1>
+			<div class="mt-4 flex items-start justify-between gap-3">
+				<div class="flex items-center gap-3">
+					<div class="h-5 w-5 shrink-0 rounded-md" style="background-color: {category.color}"></div>
+					<div>
+						<h1 class="text-2xl font-semibold tracking-tight text-foreground">{category.name}</h1>
+						<p class="mt-0.5 text-sm text-muted-foreground">{goalDisplay(category)}</p>
+					</div>
+				</div>
+				<button
+					onclick={() => (catModal = true)}
+					class="shrink-0 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+				>
+					Edit category
+				</button>
 			</div>
-			<p class="mt-1 text-sm text-muted-foreground">{goalDisplay(category)}</p>
 		</div>
 
 		<!-- ── Tasks section ── -->
@@ -99,7 +123,7 @@
 				Tasks ({categoryTasks.length})
 			</h2>
 			<button
-				onclick={() => (modal = 'add')}
+				onclick={() => (taskModal = 'add')}
 				class="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary/90"
 			>
 				+ Add task
@@ -109,9 +133,12 @@
 		{#if categoryTasks.length === 0}
 			<div class="rounded-xl border border-border bg-card px-6 py-10 text-center">
 				<p class="text-sm text-muted-foreground">No tasks yet.</p>
-				<button onclick={() => (modal = 'add')} class="mt-2 text-sm text-primary hover:underline"
-					>Add your first task</button
+				<button
+					onclick={() => (taskModal = 'add')}
+					class="mt-2 text-sm text-primary hover:underline"
 				>
+					Add your first task
+				</button>
 			</div>
 		{:else}
 			<div class="space-y-2">
@@ -127,7 +154,7 @@
 							<p class="mt-0.5 text-xs text-muted-foreground">{describeRepeat(task)}</p>
 						</div>
 						<button
-							onclick={() => (modal = task)}
+							onclick={() => (taskModal = task)}
 							class="shrink-0 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
 						>
 							Edit
@@ -136,18 +163,5 @@
 				{/each}
 			</div>
 		{/if}
-
-		<!-- ── Danger zone ── -->
-		<div class="mt-12 border-t border-border pt-6">
-			<p class="mb-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-				Danger zone
-			</p>
-			<button
-				onclick={handleDeleteCategory}
-				class="rounded-lg border border-destructive/40 px-4 py-2 text-sm text-destructive transition-colors hover:bg-destructive hover:text-white"
-			>
-				Delete category
-			</button>
-		</div>
 	</main>
 {/if}
