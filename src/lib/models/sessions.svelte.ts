@@ -5,11 +5,11 @@ class SessionStore {
 	active = $state<Session | null>(null);
 	loading = $state(false);
 
-	async start(instanceId: string) {
+	async start(taskId: string) {
 		const now = Math.floor(Date.now() / 1000);
 		const { data, error } = await supabase
 			.from('session')
-			.insert({ instance_id: instanceId, started_at: now })
+			.insert({ task_id: taskId, started_at: now })
 			.select()
 			.single();
 		if (!error && data) this.active = data as Session;
@@ -29,7 +29,6 @@ class SessionStore {
 	}
 
 	async checkActive() {
-		// Check if there's a session without ended_at
 		const { data } = await supabase
 			.from('session')
 			.select('*')
@@ -39,11 +38,11 @@ class SessionStore {
 		if (data) this.active = data as Session;
 	}
 
-	async fetchForInstance(instanceId: string): Promise<Session[]> {
+	async fetchForTask(taskId: string): Promise<Session[]> {
 		const { data } = await supabase
 			.from('session')
 			.select('*')
-			.eq('instance_id', instanceId)
+			.eq('task_id', taskId)
 			.order('started_at', { ascending: true });
 		return (data ?? []) as Session[];
 	}

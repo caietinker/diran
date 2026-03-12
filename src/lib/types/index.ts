@@ -24,8 +24,20 @@ export interface Task {
 	repeat_month_days: number | null; // 31-bit mask: bit0=day1, bit30=day31
 	start_date: number | null; // Unix timestamp (midnight) for once-time or start of repeat
 	end_date: number | null; // Unix timestamp (midnight) for end of repeat
+	done_dates: number[]; // Unix timestamps (midnight) for completed dates
+	skipped_dates: number[]; // Unix timestamps (midnight) for skipped dates
 }
 
+export interface History {
+	id: string;
+	task_id: string;
+	date: string; // YYYY-MM-DD
+	status: 'done' | 'skipped';
+	created_at: string;
+}
+
+// Legacy: Instance is kept for backward compatibility during migration
+// New code should use Task.done_dates/skipped_dates + compute on the fly
 export interface Instance {
 	id: string;
 	task_id: string;
@@ -35,7 +47,7 @@ export interface Instance {
 
 export interface Session {
 	id: string;
-	instance_id: string;
+	task_id: string;
 	started_at: number;
 	ended_at: number | null;
 }

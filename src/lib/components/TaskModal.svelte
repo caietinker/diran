@@ -2,36 +2,27 @@
 	import { untrack } from 'svelte';
 	import { categories } from '$lib/models/categories.svelte';
 	import { tasks } from '$lib/models/tasks.svelte';
-	import { instances } from '$lib/models/instances.svelte';
 	import { sessions } from '$lib/models/sessions.svelte';
-	import type { Task, Session, RepeatFreq, InstanceWithTask } from '$lib/types';
+	import { history } from '$lib/models/history.svelte';
+	import type { Task, Session, RepeatFreq } from '$lib/types';
 	import Modal from '$lib/components/Modal.svelte';
 
 	/**
 	 * Props:
-	 *  - mode: 'add' (no task/instance yet) | 'edit' (existing task, possibly with an instance)
+	 *  - mode: 'add' | 'edit'
 	 *  - task: existing Task when mode='edit'
-	 *  - instance: existing InstanceWithTask when opened from Today (optional even in edit mode)
 	 *  - defaultCategoryId: pre-select a category (used when opening from a category page)
 	 *  - onclose: called after close/save (so parent can refresh)
 	 */
 	interface Props {
 		mode: 'add' | 'edit';
 		task?: Task | null;
-		instance?: InstanceWithTask | null;
 		defaultCategoryId?: string;
-		elapsed?: number; // live elapsed seconds from parent timer (for active session display)
+		elapsed?: number;
 		onclose: (changed: boolean) => void;
 	}
 
-	let {
-		mode,
-		task = null,
-		instance = null,
-		defaultCategoryId = '',
-		elapsed = 0,
-		onclose
-	}: Props = $props();
+	let { mode, task = null, defaultCategoryId = '', elapsed = 0, onclose }: Props = $props();
 
 	// ─── Tabs ──────────────────────────────────────────────────────────────────
 	type Tab = 'edit' | 'sessions' | 'history';
@@ -63,7 +54,7 @@
 	let deleting = $state(false);
 
 	// ─── Sessions tab state ────────────────────────────────────────────────────
-	let drawerInstanceId = $state<string | null>(untrack(() => instance?.id ?? null));
+	let drawerTaskId = $state<string | null>(untrack(() => task?.id ?? null));
 	let drawerSessions = $state<Session[]>([]);
 	let sessionsLoading = $state(false);
 
@@ -78,27 +69,25 @@
 	// ─── Load sessions / history on mount if in edit mode ─────────────────────
 	$effect(() => {
 		if (mode === 'edit' && task) {
-			if (instance) {
-				loadSessions(instance.id);
-			}
+			loadSessions(task.id);
 			loadHistory(task.id);
 		}
 	});
 
-	async function loadSessions(instId: string) {
+	async function loadSessions(taskId: string) {
 		sessionsLoading = true;
-		drawerSessions = await sessions.fetchForInstance(instId);
+		drawerSessions = await sessions.fetchForTask(taskId);
 		sessionsLoading = false;
 	}
 
 	async function loadHistory(taskId: string) {
 		historyLoading = true;
-		historyItems = await instances.fetchForTask(taskId);
+		historyItems = await history.fetchForTask(taskId);
 		historyLoading = false;
 	}
 
 	async function selectHistoryInstance(instId: string) {
-		drawerInstanceId = instId;
+		drawerTaskId = instId;
 		activeTab = 'sessions';
 		await loadSessions(instId);
 	}
@@ -106,8 +95,8 @@
 	// ─── Re-fetch sessions when active session changes ────────────────────────
 	$effect(() => {
 		const _active = sessions.active;
-		if (drawerInstanceId && activeTab === 'sessions') {
-			loadSessions(drawerInstanceId);
+		if (drawerTaskId && activeTab === 'sessions') {
+			loadSessions(drawerTaskId);
 		}
 	});
 
@@ -158,12 +147,10 @@
 				repeat_weekdays: freq === 'weekly' ? editRepeatWeekdays : null,
 				repeat_month_days: freq === 'monthly' ? editRepeatMonthDays : null,
 				start_date: startDateUnix,
-				end_date: endDateUnix
+				end_date: endDateUnix,
+				done_dates: [],
+				skipped_dates: []
 			});
-			// If no repeat (one-off), immediately create an instance for the selected date
-			if (!freq && newTask) {
-				await instances.addOneOff(newTask.id, startDateUnix);
-			}
 		} else if (task) {
 			await tasks.update(task.id, {
 				category_id: editCategoryId,
@@ -218,7 +205,7 @@
 	);
 
 	// ─── Derived display helpers ──────────────────────────────────────────────
-	const hasInstance = $derived(mode === 'edit' && instance !== null);
+	const hasInstance = $derived(mode === 'edit' && task !== null);
 	const selectedCategory = $derived(categories.items.find((c) => c.id === editCategoryId));
 </script>
 
@@ -494,7 +481,7 @@
 				<div class="py-8 text-center text-sm text-muted-foreground">Loading sessions…</div>
 			{:else if drawerSessions.length === 0}
 				<div class="py-8 text-center">
-					<p class="text-sm text-muted-foreground">No sessions recorded for this instance.</p>
+					<p class="text-sm text-muted-foreground">No sessions recorded for this task.</p>
 					<p class="mt-1 text-xs text-muted-foreground">
 						Start a timer from the Today view to log time.
 					</p>
@@ -544,7 +531,7 @@
 			{:else}
 				<div class="space-y-1">
 					{#each historyItems as item (item.id)}
-						{@const isCurrent = drawerInstanceId === item.id}
+						{@const isCurrent = drawerTaskId === item.id}
 						<button
 							onclick={() => selectHistoryInstance(item.id)}
 							class="flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left transition-colors {isCurrent
