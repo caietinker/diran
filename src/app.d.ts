@@ -16,4 +16,25 @@ declare global {
 	}
 }
 
+declare module 'virtual:pwa-info' {
+	export const pwaInfo:
+		| {
+				webManifest: {
+					href: string;
+				};
+		  }
+		| undefined;
+}
+
+declare module '$virtual/pwa-register' {
+	export function registerSW(options?: {
+		immediate?: boolean;
+		onNeedRefresh?: () => void;
+		onReady?: () => void;
+		onRegistered?: (registration: ServiceWorkerRegistration | undefined) => void;
+		onRegisteredSW?: (swUrl: string, registration: ServiceWorkerRegistration | undefined) => void;
+		onRegisterError?: (error: any) => void;
+	}): Promise<void>;
+}
+
 export {};

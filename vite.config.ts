@@ -9,6 +9,7 @@ export default defineConfig({
 		sveltekit(),
 		SvelteKitPWA({
 			registerType: 'autoUpdate',
+			injectRegister: 'script',
 			buildBase: '/',
 			manifest: {
 				name: 'Diran',
