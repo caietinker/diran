@@ -16,7 +16,7 @@ await sharp({
 	}
 })
 	.png()
-	.toFile(join(staticDir, 'pwa-192x192.png'));
+	.toFile(join(staticDir, 'identity/logo-192.png'));
 
 const size512 = 512;
 await sharp({
@@ -28,6 +28,6 @@ await sharp({
 	}
 })
 	.png()
-	.toFile(join(staticDir, 'pwa-512x512.png'));
+	.toFile(join(staticDir, 'identity/logo-512.png'));
 
 console.log('Icons generated successfully!');
