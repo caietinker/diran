@@ -14,7 +14,7 @@
 <svelte:head>
 	<link rel="icon" href={favicon} />
 	<link rel="manifest" href="/manifest.webmanifest" />
-	<meta name="theme-color" content="#4f46e5" />
+	<meta name="theme-color" content="#ef6306" />
 </svelte:head>
 
 {@render children()}

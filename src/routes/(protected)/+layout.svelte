@@ -28,6 +28,24 @@
 		now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }).replace(' ', '\u00a0')
 	);
 
+	// ─── 8PM Countdown ──────────────────────────────────────────────────────────
+	const targetHour = 20;
+	const timeUntil8pm = $derived(() => {
+		const today = new Date(now);
+		const target = new Date(today);
+		target.setHours(targetHour, 0, 0, 0);
+
+		if (now >= target) {
+			target.setDate(target.getDate() + 1);
+		}
+
+		const diff = target.getTime() - now.getTime();
+		const hours = Math.floor(diff / (1000 * 60 * 60));
+		const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+		const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+		return `${hours}h ${minutes.toString().padStart(2, '0')}m ${seconds.toString().padStart(2, '0')}s`;
+	});
+
 	// ─── Dark mode ────────────────────────────────────────────────────────────
 	let dark = $state(false);
 
@@ -71,12 +89,16 @@
 		</div>
 
 		<div class="ml-auto flex items-center gap-3">
-			<!-- Live clock -->
-			<span class="font-mono text-sm text-muted-foreground tabular-nums select-none">
-				<span class="hidden sm:inline">
-					{clockTime} -
-				</span>
-				{clockDate}
+			<!-- Live clock & 8PM countdown -->
+			<span
+				class="hidden font-mono text-sm text-muted-foreground tabular-nums select-none sm:inline-flex"
+				title="Current time"
+			>
+				{clockTime} - {clockDate}
+			</span>
+
+			<span class="font-mono text-sm text-primary tabular-nums select-none" title="Time until 8pm">
+				{timeUntil8pm()}
 			</span>
 
 			<!-- Dark mode toggle -->

@@ -15,7 +15,7 @@ export default defineConfig({
 				name: 'Diran',
 				short_name: 'Diran',
 				description: 'Personal app',
-				theme_color: '#4f46e5',
+				theme_color: '#ef6306',
 				background_color: '#ffffff',
 				start_url: '/',
 				display: 'standalone',
